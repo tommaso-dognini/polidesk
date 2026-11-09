@@ -53,10 +53,12 @@
         if (dp) out.push(`<button class="act-chip paused" data-go="run" title="Download in pausa">${icon('pause')} ${dp}</button>`);
         if (tr || tq) out.push(`<button class="act-chip" data-go="run" title="Trascrizioni">${icon('mic')} ${tr ? pct(tr.percent) : ''}${tq ? `<span class="faint"> +${tq}</span>` : ''}</button>`);
         if (tp) out.push(`<button class="act-chip paused" data-go="run" title="Trascrizioni in pausa">${icon('mic')}${icon('pause')} ${tp}</button>`);
-        if (ai) out.push(`<button class="act-chip" data-go="run" title="${esc(s.ai.current || 'AI in coda')}">${icon('sparkles')} ${ai}</button>`);
+        if (s.ai.paused) out.push(`<button class="act-chip warn" data-ai="1" title="${esc(s.ai.paused.label)}: note AI in pausa">${icon('sparkles')}${icon('pause')}</button>`);
+        else if (ai) out.push(`<button class="act-chip" data-go="run" title="${esc(s.ai.current || 'AI in coda')}">${icon('sparkles')} ${ai}</button>`);
         if (s.drives.length) out.push(`<button class="act-chip warn" data-drive="1" title="Disco esterno non collegato">${icon('alert')} ${esc(s.drives[0].name)}</button>`);
         $('#act-chips').innerHTML = out.join('');
         $$('#act-chips [data-go]').forEach(b => b.onclick = () => open('run'));
+        $$('#act-chips [data-ai]').forEach(b => b.onclick = () => { aiModalFor = null; aiLimitModal(A.snap.ai.paused); });
         $$('#act-chips [data-drive]').forEach(b => b.onclick = () => driveModal(A.snap.drives[0]));
         if (!busy() && /^(Pronto|)$/.test($('#act-text').textContent) === false && $('#act-dot').classList.contains('busy')) $('#act-dot').className = 'dot idle';
         if (s.sync.running && s.sync.currentName) status(`Sincronizzo ${s.sync.currentName}…`);
@@ -109,7 +111,10 @@
             ${trs.map(trRow).join('') || '<div class="ap-none">Nessuna trascrizione in coda</div>'}</section>`);
         // AI
         const ai = s.ai;
-        if (ai.current || ai.pending) sec.push(`<section class="ap-sec"><h4>${icon('sparkles')} AI <span class="faint">${(ai.current ? 1 : 0) + (ai.pending || 0)}</span></h4>
+        if (ai.paused) sec.push(`<section class="ap-sec"><h4>${icon('sparkles')} AI <span class="faint">in pausa</span></h4>
+            <div class="ap-row"><div class="ap-main"><b>${esc(ai.paused.label)} ${ai.paused.kind === 'quota' ? 'ha esaurito la quota' : 'richiede il login'}</b><div class="faint">${ai.pending ? `${ai.pending} note AI in attesa` : 'note AI in pausa'}${ai.paused.resetsAt ? ' · reset ' + new Date(ai.paused.resetsAt).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</div></div>
+            <button class="small primary" id="ai-pick">Scegli strumento…</button><button class="small" id="ai-retry">Riprova</button></div></section>`);
+        else if (ai.current || ai.pending) sec.push(`<section class="ap-sec"><h4>${icon('sparkles')} AI <span class="faint">${(ai.current ? 1 : 0) + (ai.pending || 0)}</span></h4>
             ${ai.current ? `<div class="ap-row"><span class="spin"></span><div class="ap-main">${esc(ai.current)}</div></div>` : ''}
             ${ai.pending ? `<div class="ap-none">altri ${ai.pending} in coda (sommari, appunti, pagine dei corsi)</div>` : ''}</section>`);
         const body = $('.ap-body', p);
@@ -120,6 +125,8 @@
         act('#tr-pause', () => api.activity.pauseTranscriptions());
         act('#tr-resume', () => api.activity.resumeTranscriptions());
         act('#ap-stop', () => api.stopSync());
+        if ($('#ai-pick', body)) $('#ai-pick', body).onclick = () => { aiModalFor = null; aiLimitModal(s.ai.paused); };
+        act('#ai-retry', () => api.aiSwitch.resume());
         $$('[data-drv]', body).forEach(b => b.onclick = () => driveModal(s.drives[+b.dataset.drv]));
         $$('[data-dl]', body).forEach(b => b.onclick = () => guard(async () => {
             b.disabled = true; const [cid, key] = [b.dataset.course, b.dataset.key];
@@ -247,6 +254,7 @@
         switch (e.type) {
             case 'activity-log': addLog(e.entry); break;
             case 'ai-limit': aiLimitModal(e); load(); break;
+            case 'ai-resumed': load(); break;
             case 'activity': load(); break;
             case 'progress': liveProgress(e); break;
             case 'transcribe-progress': liveTranscribe(e); break;
