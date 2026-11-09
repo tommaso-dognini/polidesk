@@ -3,9 +3,9 @@
 // PoliRec command line (same engine as the app; shares ~/.polirec config and Chrome session)
 //
 //   node src/cli.js courses                         list your WeBeep courses
-//   node src/cli.js add <course> <dir> [name]       add a course (link, code, name or webeep:<id>)
+//   node src/cli.js add <course> <dir> [name] [--materials] [--lang en]   add a course (any WeBeep link, code, name or webeep:<id>)
 //   node src/cli.js list                            list configured courses
-//   node src/cli.js sync [nameOrIndex...] [--dry-run] [-j N]
+//   node src/cli.js sync [nameOrIndex...] [--dry-run] [-j N] [--limit N] [--materials]
 //   node src/cli.js transcribe [nameOrIndex]        transcribe downloaded videos without transcript
 const path = require('path');
 const crypto = require('crypto');
@@ -32,9 +32,11 @@ function pick(cfg, sel) {
         try { (await webeep.enrolledCourses(s)).sort((a, b) => b.id - a.id).forEach(c => console.log(`webeep:${c.id}\t${c.fullname}`)); }
         finally { await s.close(); }
     } else if (cmd === 'add') {
+        const materials = bool('--materials');
+        const language = flag('--lang', '');
         const [input, dir, name] = args;
         if (!input || !dir) throw new Error('uso: add <corso> <cartella> [nome]');
-        const c = { id: crypto.randomUUID(), input, dir: path.resolve(dir), name: name || '', extraUrls: [] };
+        const c = { id: crypto.randomUUID(), input, dir: path.resolve(dir), name: name || '', extraUrls: [], materials, language };
         const m = input.match(/^webeep:(\d+)$/); if (m) c.webeepId = +m[1];
         cfg.courses.push(c); lib.saveConfig(cfg);
         console.log('Aggiunto:', c.name || c.input, '→', c.dir);
@@ -46,6 +48,9 @@ function pick(cfg, sel) {
     } else if (cmd === 'sync') {
         const dryRun = bool('--dry-run');
         const parallel = +flag('-j', cfg.settings.parallelDownloads);
+        const limit = +flag('--limit', 0) || 0;
+        const onlyMaterials = bool('--only-materials');
+        const withMaterials = bool('--materials') || onlyMaterials ? true : undefined;
         const list = pick(cfg, args);
         const s = new Session({ email: cfg.settings.polimiEmail, onLoginRequired: () => console.log('\x07') });
         let stop = false;
@@ -55,7 +60,7 @@ function pick(cfg, sel) {
                 console.log(`\n━━ ${c.name || c.input} ━━`);
                 const lastPct = {};
                 const r = await syncCourse(s, c, {
-                    dryRun, parallel, shouldStop: () => stop,
+                    dryRun, parallel, limit, onlyMaterials, materials: withMaterials, shouldStop: () => stop,
                     emit: e => {
                         if (e.type === 'log') console.log(e.msg);
                         if (e.type === 'progress' && process.stdout.isTTY) {

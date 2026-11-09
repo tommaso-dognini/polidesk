@@ -12,6 +12,14 @@ const PROVIDERS = {
 };
 
 const TEMPLATES = {
+    sommario: {
+        label: 'Sommario breve (per l\'indice)',
+        suffix: 'sommario',
+        prompt: `Riceverai la trascrizione automatica di una lezione universitaria. Scrivi in Markdown, nella lingua della lezione:
+1. UNA frase (max 30 parole) che descrive di cosa tratta la lezione;
+2. da 3 a 6 bullet ("- ") con gli argomenti principali, max 12 parole ciascuno.
+Niente titoli, niente introduzioni, niente altro testo.`,
+    },
     appunti: {
         label: 'Appunti strutturati',
         suffix: 'appunti',
@@ -51,7 +59,7 @@ function available() {
 }
 
 function env() {
-    return { ...process.env, PATH: [process.env.PATH, path.join(require('os').homedir(), '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin'].join(':') };
+    return require('./downloader').toolEnv();
 }
 
 /** Pure text-in / markdown-out run: transcript on stdin, prompt as argument, no tools. */

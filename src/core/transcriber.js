@@ -35,7 +35,7 @@ class Transcriber {
         const formats = (opts.format || 'txt').split(',').concat(['srt']).filter((v, i, a) => a.indexOf(v) === i).join(',');
         const args = [SCRIPT, '--model', opts.model || 'small', '--language', opts.language || 'it', '--formats', formats, '--out-dir', job.outDir, job.video];
         const py = opts.python || 'python3';
-        const env = { ...process.env, PATH: [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin'].join(':'), PYTHONUNBUFFERED: '1' };
+        const env = { ...require('./downloader').toolEnv(), PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' };
         const p = spawn(py, args, { env });
         this.running = p;
         let result = null, errText = '';

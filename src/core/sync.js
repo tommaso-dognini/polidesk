@@ -7,6 +7,7 @@ const recman = require('./recman');
 const webex = require('./webex');
 const dl = require('./downloader');
 const lib = require('./library');
+const materials = require('./materials');
 
 /**
  * @param {Session} session
@@ -49,20 +50,33 @@ async function syncCourse(session, course, opts = {}) {
             if (src.type === 'recman') {
                 log(`📚 Archivio: ${src.label || src.url}`);
                 const recs = await recman.listRecordings(session, src.url, log);
+                if (!recs.length) log('  ℹ Archivio vuoto: il docente non ha (ancora) pubblicato registrazioni qui');
                 for (const r of recs) {
                     const key = r.transferId ? `recman-${r.transferId}` : `recman-${r.isoDate}-${lib.sanitize(r.topic, 40)}`;
                     found.push({ key, rec: { ...r, source: 'recman', sourceLabel: src.label, teacher: lib.teacherFrom(r.course) } });
                 }
             } else if (src.type === 'webex') {
-                const playback = await webex.resolveToPlayback(session, src.url);
-                const info = await webex.getStreamInfo(session, playback).catch(e => ({ error: e.message }));
-                const id = webex.extractRecordingId(playback);
-                const created = info.createTime ? new Date(info.createTime) : null;
-                found.push({
-                    key: `webex-${id}`, rec: {
-                        source: 'webex', sourceLabel: src.label, webexUrl: playback, topic: info.recordName || src.label,
+                // direct WebEx links (RCID / playback): resolved once, then cached in the manifest
+                manifest.sourceCache = manifest.sourceCache || {};
+                let entry = manifest.sourceCache[src.url];
+                if (!entry || entry.error) {
+                    const playback = await webex.resolveToPlayback(session, src.url);
+                    const info = await webex.getStreamInfo(session, playback).catch(e => ({ error: e.message }));
+                    const id = webex.extractRecordingId(playback);
+                    const created = info.createTime ? new Date(info.createTime) : null;
+                    entry = manifest.sourceCache[src.url] = {
+                        key: `webex-${id}`, webexUrl: playback, recordName: info.recordName, error: info.error,
                         isoDate: created ? new Date(created.getTime() - created.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : null,
                         duration: info.duration ? Math.round(info.duration / 60000) + ' min' : '',
+                    };
+                    log(`  🔗 ${src.label} → ${entry.recordName || entry.error || ''}`);
+                }
+                found.push({
+                    key: entry.key, rec: {
+                        source: 'webex', sourceLabel: src.label, webexUrl: entry.webexUrl,
+                        // the teacher's link text is usually more meaningful than the WebEx meeting name
+                        topic: src.label && !/^https?:/.test(src.label) ? src.label : entry.recordName,
+                        webexName: entry.recordName, isoDate: entry.isoDate, duration: entry.duration,
                     }
                 });
             } else if (src.type === 'direct') {
@@ -90,10 +104,24 @@ async function syncCourse(session, course, opts = {}) {
     save();
     lib.writeIndex(course.dir, manifest);
 
-    const todo = found.map(f => manifest.recordings[f.key]).filter(r => r.status !== 'downloaded' && !r.ignored);
-    log(`📋 ${found.length} registrazioni trovate, ${todo.length} da scaricare`);
+    let todo = found.map(f => manifest.recordings[f.key]).filter((r, i, a) => r.status !== 'downloaded' && !r.ignored && a.indexOf(r) === i);
+    // newest first, so a limited/interrupted sync always gets the latest lessons
+    todo.sort((a, b) => (b.isoDate || '').localeCompare(a.isoDate || ''));
+    if (opts.limit) todo = todo.slice(0, opts.limit);
+    if (opts.onlyMaterials) todo = [];
+    log(`📋 ${found.length} registrazioni trovate, ${todo.length} da scaricare${opts.limit ? ` (limite ${opts.limit})` : ''}`);
     emit({ type: 'summary', course: course.id, total: found.length, todo: todo.length });
-    if (opts.dryRun || !todo.length) return { total: found.length, downloaded: 0, failed: 0 };
+
+    // course material (slides, PDFs…) — only when enabled for this course
+    const wantMaterials = opts.materials !== undefined ? opts.materials : course.materials === true;
+    let materialsResult = null;
+    if (wantMaterials && !opts.dryRun && !shouldStop()) {
+        try {
+            materialsResult = await materials.syncMaterials(session, course, manifest, { log, shouldStop });
+            save();
+        } catch (e) { log('  ✗ Materiale: ' + e.message); }
+    }
+    if (opts.dryRun || !todo.length) return { total: found.length, downloaded: 0, failed: 0, materials: materialsResult };
 
     // 4+5. resolve RecMan previews → WebEx (serialized: RecMan sessions are stateful) and download
     //      with a concurrency pool, so downloads start while other previews are still being resolved.
@@ -151,7 +179,7 @@ async function syncCourse(session, course, opts = {}) {
     });
     lib.writeIndex(course.dir, manifest);
     log(`🏁 Completato: ${ok} scaricati, ${failed} errori`);
-    return { total: found.length, downloaded: ok, failed };
+    return { total: found.length, downloaded: ok, failed, materials: materialsResult };
 }
 
 function ytdlp(url, dest, onProgress) {

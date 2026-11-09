@@ -39,6 +39,8 @@ function parseCourseInput(input) {
         if (u.host.includes('webeep.polimi.it')) {
             const id = u.searchParams.get('id');
             if (u.pathname.includes('/course/view.php') && id) return { id: id.replace(/^0+/, ''), raw: id };
+            // any other WeBeep page (section.php, mod/*/view.php, …): the course id is read from the page
+            return { pageUrl: input };
         }
         return { url: input };
     } catch (e) { }
@@ -51,6 +53,11 @@ async function resolveCourse(session, input) {
     const courses = await enrolledCourses(session);
     const latestFirst = list => list.sort((a, b) => b.id - a.id);
 
+    if (parsed.pageUrl) {
+        const cid = await courseIdFromPage(session, parsed.pageUrl);
+        if (!cid) throw new Error('Impossibile ricavare il corso dalla pagina ' + parsed.pageUrl);
+        parsed.id = String(cid); parsed.raw = String(cid);
+    }
     if (parsed.id) {
         const byId = courses.find(c => String(c.id) === parsed.id);
         if (byId) return byId;
@@ -72,6 +79,15 @@ async function resolveCourse(session, input) {
     }
     if (matches.length === 0) throw new Error(`Nessun corso WeBeep trovato per "${parsed.query}" tra i tuoi corsi.`);
     return latestFirst(matches)[0]; // most recent edition (e.g. [2026-27] over [2025-26])
+}
+
+async function courseIdFromPage(session, url) {
+    return session.page.evaluate(async url => {
+        const r = await fetch(url, { credentials: 'include' });
+        const html = await r.text();
+        const m = html.match(/"courseId"\s*:\s*(\d+)/) || html.match(/course\/view\.php\?id=(\d+)/);
+        return m && Number(m[1]) > 1 ? Number(m[1]) : null;
+    }, url);
 }
 
 async function fetchTitle(session, url) {
@@ -168,7 +184,7 @@ async function findRecordingSources(session, course, log = () => { }) {
         seenPages.add(pageUrl);
         for (const l of d.links) {
             add(l.href, l.label, pageUrl);
-            const m = l.href.match(/\/mod\/(url|page|label|book|lti|resource)\/view\.php\?id=(\d+)/);
+            const m = l.href.match(/\/mod\/(url|page|label|book|lti|resource|forum)\/view\.php\?id=(\d+)/);
             if (m && !activities.has(m[2])) activities.set(m[2], { type: m[1], id: m[2], label: l.label, href: l.href.replace(/#.*$/, '') });
         }
     }
@@ -187,6 +203,20 @@ async function findRecordingSources(session, course, log = () => { }) {
             for (const l of d.links) {
                 if (l.href.startsWith(WEBEEP) && !/pluginfile/.test(l.href)) continue;
                 add(l.href, (act && act.label) || l.label, pageUrl);
+            }
+        }
+    }
+    // 4. announcement forums: teachers often post recording links there
+    const forums = [...activities.values()].filter(a => a.type === 'forum' && /annunc|announc|news|avvisi|comunicazioni/i.test(a.label || ''));
+    if (forums.length) {
+        const views = await fetchLinks(session, forums.map(f => `${WEBEEP}/mod/forum/view.php?id=${f.id}`));
+        const discussions = [...new Set(Object.values(views).flatMap(v => v.links.map(l => l.href.replace(/#.*$/, '')).filter(h => /\/mod\/forum\/discuss\.php\?d=\d+$/.test(h))))].slice(0, 120);
+        log(`  • Annunci: ${discussions.length} discussioni da controllare`);
+        for (let i = 0; i < discussions.length; i += 10) {
+            const batch = await fetchLinks(session, discussions.slice(i, i + 10));
+            for (const [u, d] of Object.entries(batch)) {
+                const title = (d.title || '').split('|')[0].replace(/^[^:]*:\s*/, '').trim();
+                for (const l of d.links) add(l.href, l.label && l.label.length > 3 && !/^https?:/.test(l.label) ? l.label : 'Annuncio: ' + title, u);
             }
         }
     }

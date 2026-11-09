@@ -144,16 +144,27 @@ function withFileStatus(courseDir, manifest) {
 function writeIndex(courseDir, manifest) {
     const d = courseDirs(courseDir);
     const recs = withFileStatus(courseDir, manifest);
+    fs.mkdirSync(d.root, { recursive: true });
+    // HTML overview (cards with summaries + quick links)
+    fs.writeFileSync(path.join(d.root, 'INDICE.html'), require('./indexpage').render({ course: manifest.course, recs, dirs: d, DIRS }));
+    // Markdown version (Obsidian/VS Code friendly)
     const rel = p => encodeURI(p).replace(/\(/g, '%28').replace(/\)/g, '%29');
+    const { readSummary } = require('./indexpage');
     let md = `# ${manifest.course ? manifest.course.fullname : 'Registrazioni'}\n\n`;
-    md += `Aggiornato: ${new Date().toLocaleString('it-IT')} · ${recs.length} registrazioni\n\n`;
-    md += `| # | Data | Argomento | Tipo | Durata | Video | Trascrizione | Note |\n|---|---|---|---|---|---|---|---|\n`;
-    recs.forEach((r, i) => {
-        const v = r.status === 'downloaded' && r.file ? `[▶](${rel(DIRS.video + '/' + r.file)})` : (r.status || '');
-        const t = r.transcript ? `[📄](${rel(DIRS.transcripts + '/' + r.transcript)})` : '';
-        const n = (r.notes || []).map(n => `[📝](${rel(DIRS.notes + '/' + n)})`).join(' ');
-        md += `| ${i + 1} | ${(r.isoDate || '').replace('T', ' ')} | ${(r.displayTitle || '').replace(/\|/g, '/')}${r.teacher ? ' — ' + r.teacher : ''} | ${r.type || ''} | ${r.duration || ''} | ${v} | ${t} | ${n} |\n`;
-    });
+    md += `Aggiornato: ${new Date().toLocaleString('it-IT')} · ${recs.length} registrazioni · [versione HTML](INDICE.html)\n\n`;
+    for (const r of recs.slice().reverse()) {
+        md += `## ${(r.isoDate || '').slice(0, 10)} — ${r.displayTitle || ''}${r.teacher ? ' (' + r.teacher + ')' : ''}\n\n`;
+        const meta = [r.type, r.duration].filter(Boolean).join(' · ');
+        if (meta) md += `*${meta}*\n\n`;
+        const sum = readSummary(d, r);
+        if (sum) { if (sum.text) md += sum.text + '\n\n'; for (const b of sum.bullets) md += `- ${b}\n`; if (sum.bullets.length) md += '\n'; }
+        const links = [];
+        if (r.videoExists) links.push(`[▶ Video](${rel(DIRS.video + '/' + r.file)})`);
+        if (r.webexUrl) links.push(`[WebEx](${r.webexUrl})`);
+        if (r.transcript) links.push(`[Trascrizione](${rel(DIRS.transcripts + '/' + r.transcript)})`);
+        for (const n of r.notes) if (!/ - sommario\.md$/.test(n)) links.push(`[${n.split(' - ').pop().replace('.md', '')}](${rel(DIRS.notes + '/' + n)})`);
+        md += (links.join(' · ') || '_non scaricato_') + '\n\n';
+    }
     fs.writeFileSync(d.index, md);
 }
 
