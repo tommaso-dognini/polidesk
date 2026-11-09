@@ -14,6 +14,7 @@ pub fn default_settings() -> Value {
         "notesRoot": "",
         "ai": { "provider": "agy", "model": "", "autoNotes": false, "autoSummary": true, "autoCoursePage": true },
         "autoSync": { "onStart": true, "intervalHours": 0 },
+        "browser": { "show": false },
         "ui": { "theme": "normal", "font": "system", "appearance": "auto" },
         "setupDone": false,
         "cloud": { "enabled": false, "provider": "", "path": "", "lastPulled": "", "lastPushed": "" },

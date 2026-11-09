@@ -46,6 +46,12 @@ pub struct Daemon {
     search_ok: Mutex<Option<bool>>,
     auto_timer: Mutex<Option<tokio::task::JoinHandle<()>>>,
     pub hw: Mutex<Option<Value>>,
+    pub dl_control: Arc<sync::Control>,
+    pub activity: Mutex<crate::activity::Activity>,
+    /// logins handed to the app's login window, waiting for its cookies
+    logins: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Vec<Value>>>>>,
+    /// connected app windows (logins go to the app when there is one)
+    pub ui_clients: std::sync::atomic::AtomicUsize,
 }
 
 impl Daemon {
@@ -71,6 +77,10 @@ impl Daemon {
             search_ok: Default::default(),
             auto_timer: Default::default(),
             hw: Default::default(),
+            dl_control: Default::default(),
+            activity: Default::default(),
+            logins: Default::default(),
+            ui_clients: Default::default(),
         })
     }
     pub fn send(&self, v: Value) {
@@ -88,6 +98,9 @@ impl Daemon {
     }
 
     pub fn start_background(self: &Arc<Self>) {
+        crate::activity::restore_pauses(self);
+        crate::activity::restore_log(self);
+        crate::activity::start_tracker(self.clone());
         // settings/courses changed on another computer (cloud folder)
         let d = self.clone();
         tokio::spawn(async move {
@@ -133,18 +146,56 @@ impl Daemon {
         if let Some(s) = g.as_ref() {
             return s.clone();
         }
-        let (d1, d2) = (self.clone(), self.clone());
-        let s = Session::new(
-            util::s(&config::load()["settings"], "polimiEmail").to_string(),
-            Arc::new(move |m| d1.log(m, None)),
-            Arc::new(move |_u| {
-                d2.send(json!({ "type": "login-required" }));
-                d2.notify("Login richiesto: completa l'accesso nella finestra di Chrome.");
-            }),
-        );
+        let settings = config::load()["settings"].clone();
+        let email = util::s(&settings, "polimiEmail").to_string();
+        // hidden browser unless the student asked to see it (Impostazioni → Sincronizzazione)
+        let headless = !util::b(&settings["browser"], "show") && std::env::var_os("POLIREC_SHOW_BROWSER").is_none();
+        let d1 = self.clone();
+        let d2 = self.clone();
+        let em = email.clone();
+        let login: polirec_core::browser::LoginFn = Arc::new(move |target: String, login_url: String| {
+            let d = d2.clone();
+            let em = em.clone();
+            Box::pin(async move { d.login(target, login_url, em).await })
+        });
+        let s = Session::new(email, Arc::new(move |m| d1.log(m, None)), headless, login);
         *g = Some(s.clone());
         s
     }
+    /// Ask the student to log in: in the app's login window when the app is open, otherwise in a
+    /// small Chrome window. Returns the cookies to copy into the hidden browser.
+    async fn login(self: &Arc<Self>, target: String, login_url: String, email: String) -> Result<Vec<Value>> {
+        if let Some(u) = login_url.strip_prefix("visible:") {
+            // visible browser mode: the student logs in right there
+            self.send(json!({ "type": "login-required", "url": u }));
+            self.notify("Login richiesto: completa l'accesso nella finestra di Chrome.");
+            return Ok(vec![]);
+        }
+        if self.ui_clients.load(Ordering::Relaxed) > 0 {
+            let id = uuid::Uuid::new_v4().to_string();
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            self.logins.lock().unwrap().insert(id.clone(), tx);
+            self.send(json!({ "type": "login-required", "id": id, "url": target, "loginUrl": login_url, "email": email }));
+            self.notify("Accedi al Politecnico nella finestra di PoliRec per continuare.");
+            let r = tokio::time::timeout(Duration::from_secs(15 * 60), rx).await;
+            self.logins.lock().unwrap().remove(&id);
+            return match r {
+                Ok(Ok(r)) => r,
+                Ok(Err(_)) => bail!("Login annullato"),
+                Err(_) => bail!("Login non completato entro 15 minuti"),
+            };
+        }
+        let d = self.clone();
+        polirec_core::browser::visible_login(&target, &email, Arc::new(move |m| d.log(m, None))).await
+    }
+    /// The app's login window finished (cookies) or was closed (None).
+    pub fn login_result(&self, id: &str, cookies: Option<Vec<Value>>) -> bool {
+        match self.logins.lock().unwrap().remove(id) {
+            Some(tx) => tx.send(cookies.ok_or_else(|| anyhow!("Login annullato"))).is_ok(),
+            None => false,
+        }
+    }
+
     pub async fn close_session(&self) {
         let s = self.session.lock().await.take();
         if let Some(s) = s {
@@ -440,7 +491,7 @@ impl Daemon {
             let d2 = d.clone();
             let log = move |m: String| d2.log(m, None);
             let r = match &cid {
-                Some(id) => match config::find_course(&c0, id) {
+                Some(id) => match config::find_course(&c0, id).filter(|c| polirec_core::drives::missing(&lib::dir_of(c)).is_none()) {
                     Some(c) => search::index_course(&c0["settings"], &c, &log).await.map(|_| ()),
                     None => Ok(()),
                 },
@@ -507,6 +558,22 @@ impl Daemon {
             tokio::spawn(async move { d.run_sync_queue().await });
         }
     }
+    /// Queue a course again even if it is syncing right now (it runs once more afterwards).
+    pub fn enqueue_sync_again(self: &Arc<Self>, id: &str) {
+        let start = {
+            let mut s = self.sync.lock().unwrap();
+            if !s.queue.iter().any(|x| x == id) {
+                s.queue.push(id.to_string());
+            }
+            self.send(json!({ "type": "sync-queue", "queue": s.queue, "current": s.current }));
+            !std::mem::replace(&mut s.running, true)
+        };
+        if start {
+            let d = self.clone();
+            tokio::spawn(async move { d.run_sync_queue().await });
+        }
+    }
+
     pub fn stop_sync(&self) {
         self.stop_sync.store(true, Ordering::Relaxed);
         self.sync.lock().unwrap().queue.clear();
@@ -532,6 +599,12 @@ impl Daemon {
                 id
             };
             let Some(c) = config::find_course(&config::load(), &id) else { continue };
+            // course folder on an external drive that is not connected: ask for it, sync when it's back
+            if let Some(w) = crate::activity::wait_for_drive(&self, &id) {
+                self.send(util::merge(&json!({ "type": "drive-missing", "course": id }), &w));
+                self.send(json!({ "type": "sync-course", "course": id, "state": "waiting-drive" }));
+                continue;
+            }
             self.send(json!({ "type": "sync-course", "course": id, "state": "running" }));
             match self.sync_one(&c).await {
                 Ok(r) => {
@@ -580,6 +653,7 @@ impl Daemon {
         let opts = sync::Opts {
             parallel: (if util::f(&o, "parallel") > 0.0 { util::f(&o, "parallel") } else { util::f(&s, "parallelDownloads") } as usize).max(1),
             stop: self.stop_sync.clone(),
+            control: self.dl_control.clone(),
             limit: o["limit"].as_u64().filter(|l| *l > 0).map(|l| l as usize),
             materials: o["materials"].as_bool(),
             only_materials: util::b(&o, "onlyMaterials"),

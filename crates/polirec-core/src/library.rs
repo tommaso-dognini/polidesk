@@ -51,7 +51,15 @@ pub fn load_manifest(dir: &Path) -> Value {
     }
     m
 }
+/// Refuse to write into a course folder whose external drive is not connected.
+pub fn ensure_drive(dir: &Path) -> Result<()> {
+    if let Some((name, _)) = crate::drives::missing(dir) {
+        anyhow::bail!("Il disco «{name}» non è collegato");
+    }
+    Ok(())
+}
 pub fn save_manifest(dir: &Path, m: &Value) -> Result<()> {
+    ensure_drive(dir)?;
     util::write_json(&course_dirs(dir).manifest, m)
 }
 
@@ -247,6 +255,7 @@ pub fn unfollowed_files(dir: &Path, manifest: &Value, teachers: &Value) -> Vec<P
 /// INDICE.html (cards) + INDICE.md (Obsidian / VS Code friendly)
 pub fn write_index(dir: &Path, manifest: &Value) -> Result<()> {
     let d = course_dirs(dir);
+    ensure_drive(dir)?;
     let recs: Vec<Value> = with_file_status(dir, manifest).into_iter().filter(|r| followed(manifest.get("teachers"), r)).collect();
     std::fs::create_dir_all(&d.root)?;
     std::fs::write(d.root.join("INDICE.html"), indexpage::render(manifest.get("course"), &recs, &d))?;

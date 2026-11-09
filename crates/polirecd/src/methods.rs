@@ -325,6 +325,101 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
             }
             Ok(json!(String::from_utf8_lossy(&out.stdout).trim()))
         }
+        // ── background activity, pause/resume ──
+        "activity:list" => Ok(crate::activity::snapshot(d)),
+        "activity:log" => Ok(crate::activity::log(d)),
+        "download:pause" => {
+            let (cid, key) = (p.req("courseId")?.to_string(), p.req("key")?.to_string());
+            let id = polirec_core::sync::Control::id(&cid, &key);
+            d.dl_control.pause(&id);
+            crate::activity::save_pauses(d);
+            if !d.dl_control.is_active(&id) && d.sync_state().2.as_deref() != Some(cid.as_str()) {
+                set_status(&cid, &key, &["new", "error", "downloading"], "paused");
+            }
+            d.send(json!({ "type": "download-paused", "course": cid, "key": key }));
+            Ok(json!(true))
+        }
+        "download:resume" => {
+            let (cid, key) = (p.req("courseId")?.to_string(), p.req("key")?.to_string());
+            d.dl_control.resume(&polirec_core::sync::Control::id(&cid, &key));
+            crate::activity::save_pauses(d);
+            if d.sync_state().2.as_deref() != Some(cid.as_str()) {
+                set_status(&cid, &key, &["paused", "error"], "new");
+            }
+            d.send(json!({ "type": "download-queued", "course": cid, "key": key }));
+            d.enqueue_sync_again(&cid);
+            Ok(json!(true))
+        }
+        "downloads:pauseAll" => {
+            d.dl_control.pause_all();
+            crate::activity::save_pauses(d);
+            d.send(json!({ "type": "activity" }));
+            Ok(json!(true))
+        }
+        "downloads:resumeAll" => {
+            let ids = d.dl_control.paused_ids();
+            d.dl_control.resume_all();
+            crate::activity::save_pauses(d);
+            let current = d.sync_state().2;
+            let mut courses: Vec<String> = ids.iter().filter_map(|i| i.split_once(':').map(|x| x.0.to_string())).collect();
+            for c in config::courses(&config::load()) {
+                let cid = util::s(c, "id").to_string();
+                let m = lib::load_manifest(&lib::dir_of(c));
+                let paused: Vec<String> = m["recordings"].as_object().into_iter().flat_map(|o| o.values()).filter(|r| util::s(r, "status") == "paused").map(|r| util::s(r, "key").to_string()).collect();
+                if paused.is_empty() {
+                    continue;
+                }
+                if current.as_deref() != Some(cid.as_str()) {
+                    for k in &paused {
+                        set_status(&cid, k, &["paused"], "new");
+                    }
+                }
+                courses.push(cid);
+            }
+            courses.sort();
+            courses.dedup();
+            for c in &courses {
+                d.enqueue_sync_again(c);
+            }
+            d.send(json!({ "type": "activity" }));
+            Ok(json!(courses.len()))
+        }
+        "transcribe:pause" => {
+            d.transcriber.pause(std::path::Path::new(p.req("video")?));
+            crate::activity::save_pauses(d);
+            Ok(json!(true))
+        }
+        "transcribe:resume" => {
+            d.transcriber.resume(std::path::Path::new(p.req("video")?));
+            crate::activity::save_pauses(d);
+            Ok(json!(true))
+        }
+        "transcriptions:pauseAll" => {
+            d.transcriber.pause_all();
+            crate::activity::save_pauses(d);
+            Ok(json!(true))
+        }
+        "transcriptions:resumeAll" => {
+            d.transcriber.resume_all();
+            crate::activity::save_pauses(d);
+            Ok(json!(true))
+        }
+
+        // ── external drives ──
+        "drives:status" => Ok(json!(crate::activity::missing_drives(config::courses(&config::load())))),
+        "drive:wait" => {
+            let ids: Vec<String> = match p.as_array() {
+                Some(_) => util::str_list(Some(&p)),
+                None => config::courses(&config::load()).iter().map(|c| util::s(c, "id").to_string()).collect(),
+            };
+            let waiting: Vec<Value> = ids.iter().filter_map(|id| crate::activity::wait_for_drive(d, id)).collect();
+            Ok(json!(waiting))
+        }
+
+        // ── login window of the app ──
+        "login:done" => Ok(json!(d.login_result(p.req("id")?, Some(p["cookies"].as_array().cloned().unwrap_or_default())))),
+        "login:cancel" => Ok(json!(d.login_result(p.req("id")?, None))),
+
         m if m.starts_with("api:") => crate::api_methods::call(d, &m[4..], p).await,
         _ => Err(anyhow!("Metodo sconosciuto: {method}")),
     }
@@ -371,3 +466,17 @@ async fn assist(d: &Arc<Daemon>, p: &Value) -> Result<Value> {
     Ok(json!({ "mode": "answer", "text": out.trim() }))
 }
 
+
+/// Change a recording's status in the manifest (only when it is one of `from`). Not used while that
+/// course is syncing: the sync owns its manifest then.
+fn set_status(course_id: &str, key: &str, from: &[&str], to: &str) {
+    let Some(c) = config::find_course(&config::load(), course_id) else { return };
+    let dir = lib::dir_of(&c);
+    let mut m = lib::load_manifest(&dir);
+    if let Some(r) = m["recordings"].get_mut(key) {
+        if from.contains(&util::s(r, "status")) {
+            r["status"] = json!(to);
+            let _ = lib::save_manifest(&dir, &m);
+        }
+    }
+}

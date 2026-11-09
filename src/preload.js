@@ -89,5 +89,13 @@ contextBridge.exposeInMainWorld('polirec', {
     about: () => invoke('about'),
     notice: () => invoke('about:notice'),
     checkUpdate: () => invoke('update:check'),
+    activity: {
+        list: () => invoke('activity:list'), log: () => invoke('activity:log'),
+        pauseDownload: (courseId, key) => invoke('download:pause', { courseId, key }), resumeDownload: (courseId, key) => invoke('download:resume', { courseId, key }),
+        pauseDownloads: () => invoke('downloads:pauseAll'), resumeDownloads: () => invoke('downloads:resumeAll'),
+        pauseTranscription: video => invoke('transcribe:pause', { video }), resumeTranscription: video => invoke('transcribe:resume', { video }),
+        pauseTranscriptions: () => invoke('transcriptions:pauseAll'), resumeTranscriptions: () => invoke('transcriptions:resumeAll'),
+    },
+    drives: { status: () => invoke('drives:status'), wait: ids => invoke('drive:wait', ids) },
     on: cb => ipcRenderer.on('evt', (_, e) => cb(e)),
 });

@@ -77,12 +77,11 @@ const Pomo = {
         const label = { focus: 'Focus', short: 'Pausa', long: 'Pausa lunga' }[this.st.mode];
         const pct = 100 - r / this.dur(this.st.mode) * 100;
         const courses = S.courses.map(c => `<option value="${c.id}" ${this.st.courseId === c.id ? 'selected' : ''}>${esc(cname(c))}</option>`).join('');
-        el.innerHTML = `<div class="pomo-card ${this.st.mode}">
-            <div class="row"><span class="pomo-label">🍅 ${label}</span><span class="grow"></span><span class="faint" title="Sessioni completate oggi">${this.st.count || ''}</span></div>
-            <div class="pomo-time">${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}</div>
+        el.innerHTML = `<div class="pomo-card ${this.st.mode} ${this.st.running ? 'running' : ''}">
+            <div class="pomo-row"><button class="icon ghost small" id="pomo-go" title="${this.st.running ? 'Pausa' : 'Avvia'} (⌘⇧T)" aria-label="${this.st.running ? 'Pausa' : 'Avvia'}">${icon(this.st.running ? 'pause' : 'play')}</button>
+                <span class="pomo-label">${label}${this.st.count ? ` <span class="faint" title="Sessioni completate">· ${this.st.count}</span>` : ''}</span><span class="grow"></span><span class="pomo-time">${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}</span></div>
             <div class="progress"><i style="width:${pct}%"></i></div>
-            <div class="row" style="margin-top:6px"><button class="small ${this.st.running ? '' : 'primary'}" id="pomo-go">${this.st.running ? '❚❚' : '▶'}</button><button class="small ghost" id="pomo-reset" title="Azzera">↺</button><button class="small ghost" id="pomo-skip" title="Salta">⏭</button>
-            <select id="pomo-course" class="small-select" title="Corso a cui assegnare il tempo"><option value="">Generale</option>${courses}</select></div></div>`;
+            <div class="pomo-more"><select id="pomo-course" class="small-select" title="Corso a cui assegnare il tempo"><option value="">Generale</option>${courses}</select><button class="small ghost icon" id="pomo-reset" title="Azzera" aria-label="Azzera">${icon('reset')}</button><button class="small ghost icon" id="pomo-skip" title="Salta" aria-label="Salta">${icon('skip')}</button></div></div>`;
         $('#pomo-go').onclick = () => this.st.running ? this.pause() : this.start();
         $('#pomo-reset').onclick = () => this.reset();
         $('#pomo-skip').onclick = () => this.finish();
@@ -585,20 +584,20 @@ window.tabOverview = async (c, el) => {
     const fmtMin = m => m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
     el.innerHTML = `<div class="ov">
         <div class="ov-main">
-            <div class="block"><div class="block-h"><b>📄 Pagina del corso</b><span class="faint" id="pg-st"></span><span class="grow"></span><button class="small ghost" id="pg-edit">Modifica</button></div>
+            <div class="block"><div class="block-h"><b>Pagina del corso</b><span class="faint" id="pg-st"></span><span class="grow"></span><button class="small ghost" id="pg-edit">Modifica</button></div>
                 <div id="pg-view" class="md md-doc">${w.page ? PoliEditor.renderMarkdown(w.page) : '<p class="faint">Scrivi qui obiettivi, info d\'esame, link utili… (Markdown con formule $…$)</p>'}</div>
                 <div id="pg-ed" class="pg-ed hidden"></div></div>
-            <div class="block"><div class="block-h"><b>☑ Da fare</b><span class="faint">${w.todos.filter(t => !t.done).length} aperte</span></div>
+            <div class="block"><div class="block-h"><b>Da fare</b><span class="faint">${w.todos.filter(t => !t.done).length} aperte</span></div>
                 ${todoComposer(c.id, false)}<div class="todo-list">${w.todos.filter(t => !t.done).map(t => todoRow(t)).join('')}${w.todos.filter(t => t.done).slice(-3).map(t => todoRow(t)).join('')}</div></div>
-            <div class="block"><div class="block-h"><b>🎬 Ultime lezioni</b><span class="grow"></span><a data-tab="lezioni">Tutte →</a></div>
-                <div class="cards">${recent.map(r => `<div class="mini" data-key="${esc(r.key)}"><div class="faint">${esc(fmtDate(r.isoDate))} · ${esc(r.teacher || r.type || '')}</div><b>${esc(r.displayTitle)}</b>${r.summary ? `<div class="sum">${esc(r.summary)}</div>` : ''}<div class="row" style="margin-top:6px">${r.videoExists ? '<span class="pill ok">video</span>' : ''}${r.transcript ? '<span class="pill ok">testo</span>' : ''}</div></div>`).join('') || '<p class="faint">Nessuna lezione ancora.</p>'}</div></div>
+            <div class="block"><div class="block-h"><b>Ultime lezioni</b><span class="grow"></span><a data-tab="lezioni">Tutte →</a></div>
+                <div class="cards">${recent.map(r => `<div class="mini" data-key="${esc(r.key)}"><div class="faint">${esc(fmtDate(r.isoDate))} · ${esc(r.teacher || r.type || '')}</div><b>${esc(r.displayTitle)}</b>${r.summary ? `<div class="sum">${esc(r.summary)}</div>` : ''}</div>`).join('') || '<p class="faint">Nessuna lezione ancora.</p>'}</div></div>
         </div>
         <div class="ov-side">
-            <div class="block"><div class="block-h"><b>📅 Prossime lezioni</b></div>${next.map(e => `<div class="ev"><b>${new Date(e.start).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}</b> ${new Date(e.start).toTimeString().slice(0, 5)}<div class="faint">${esc((e.location || '').split('(')[0])}</div></div>`).join('') || '<p class="faint">Importa l\'orario dal Calendario.</p>'}</div>
-            <div class="block"><div class="block-h"><b>🍅 Studio</b></div><div class="stats2"><div><b>${fmtMin(w.stats.today)}</b><span>oggi</span></div><div><b>${fmtMin(w.stats.week)}</b><span>7 giorni</span></div><div><b>${w.stats.sessions}</b><span>sessioni</span></div></div>
-                <button class="small" id="ov-pomo">▶ Pomodoro su questo corso</button></div>
-            <div class="block"><div class="block-h"><b>✎ Appunti</b><span class="grow"></span><button class="small ghost" id="ov-newnote">＋</button></div>${files.slice(0, 6).map(f => `<div class="lnk" data-note="${esc(f.file)}" data-k="${f.kind}"><span class="badge-k ${f.kind}">${{ markdown: 'MD', latex: 'TeX', typst: 'Typ' }[f.kind]}</span> ${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</div>`).join('') || '<p class="faint">Nessun appunto.</p>'}</div>
-            <div class="block"><div class="block-h"><b>📎 Materiale</b><span class="grow"></span><a data-tab="materiale">Tutto →</a></div>${mats.map(f => `<div class="lnk" data-mat="${esc(f)}">📄 ${esc(f.split('/').pop())}</div>`).join('') || '<p class="faint">Nessun file.</p>'}</div>
+            <div class="block"><div class="block-h"><b>Prossime lezioni</b></div>${next.map(e => `<div class="ev"><b>${new Date(e.start).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}</b> ${new Date(e.start).toTimeString().slice(0, 5)}<div class="faint">${esc((e.location || '').split('(')[0])}</div></div>`).join('') || '<p class="faint">Importa l\'orario dal Calendario.</p>'}</div>
+            <div class="block"><div class="block-h"><b>Tempo di studio</b></div><div class="stats2"><div><b>${fmtMin(w.stats.today)}</b><span>oggi</span></div><div><b>${fmtMin(w.stats.week)}</b><span>7 giorni</span></div><div><b>${w.stats.sessions}</b><span>sessioni</span></div></div>
+                <button class="small ghost" id="ov-pomo">${icon('timer')} Avvia un Pomodoro</button></div>
+            <div class="block"><div class="block-h"><b>Appunti</b><span class="grow"></span><button class="small ghost icon" id="ov-newnote" title="Nuovo appunto" aria-label="Nuovo appunto">${icon('plus')}</button></div>${files.slice(0, 6).map(f => `<div class="lnk" data-note="${esc(f.file)}" data-k="${f.kind}"><span class="badge-k ${f.kind}">${{ markdown: 'MD', latex: 'TeX', typst: 'Typ' }[f.kind]}</span> ${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</div>`).join('') || '<p class="faint">Nessun appunto.</p>'}</div>
+            <div class="block"><div class="block-h"><b>Materiale</b><span class="grow"></span><a data-tab="materiale">Tutto →</a></div>${mats.map(f => `<div class="lnk" data-mat="${esc(f)}"><span class="faint">${icon('file')}</span> ${esc(f.split('/').pop())}</div>`).join('') || '<p class="faint">Nessun file.</p>'}</div>
         </div></div>`;
     wireTodos(el, () => window.tabOverview(c, el), c.id);
     $$('[data-tab]', el).forEach(a => a.onclick = () => go({ ...route, tab: a.dataset.tab }));

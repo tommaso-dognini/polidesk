@@ -101,16 +101,24 @@ struct Inner {
     handler: tokio::task::JoinHandle<()>,
 }
 
+/// Asks the student to log in somewhere visible (target url, login url) and returns the resulting
+/// cookies (CDP JSON format), which are then copied into the hidden browser.
+pub type LoginFn = Arc<dyn Fn(String, String) -> Pin<Box<dyn Future<Output = Result<Vec<Value>>> + Send>> + Send + Sync>;
+
 pub struct Session {
     inner: Mutex<Option<Inner>>,
     pub email: String,
     log: Log,
-    on_login_required: Arc<dyn Fn(String) + Send + Sync>,
+    /// hidden browser (headless): the student only sees a login window when it is really needed
+    headless: bool,
+    login: LoginFn,
+    /// last page asked by `goto`, reopened after a login
+    target: std::sync::Mutex<String>,
 }
 
 impl Session {
-    pub fn new(email: String, log: Log, on_login_required: Arc<dyn Fn(String) + Send + Sync>) -> Arc<Session> {
-        Arc::new(Session { inner: Mutex::new(None), email, log, on_login_required })
+    pub fn new(email: String, log: Log, headless: bool, login: LoginFn) -> Arc<Session> {
+        Arc::new(Session { inner: Mutex::new(None), email, log, headless, login, target: Default::default() })
     }
     pub fn log(&self, m: impl Into<String>) {
         (self.log)(m.into())
@@ -125,9 +133,10 @@ impl Session {
         let profile = paths::profile_dir();
         std::fs::create_dir_all(&profile)?;
         self.wait_profile_free().await?;
-        let cfg = BrowserConfig::builder()
-            .chrome_executable(find_chrome()?)
-            .with_head()
+        let mut b = BrowserConfig::builder().chrome_executable(find_chrome()?);
+        b = if self.headless { b.new_headless_mode() } else { b.with_head() };
+        let cfg = b
+            .hide()
             .user_data_dir(&profile)
             .viewport(None)
             .disable_default_args()
@@ -143,6 +152,14 @@ impl Session {
             None => browser.new_page("about:blank").await?,
         };
         self.restore_cookies(&browser).await;
+        if self.headless {
+            // the hidden browser must look like a normal Chrome to the SSO pages
+            if let Ok(ua) = browser.user_agent().await {
+                let ua = ua.replace("HeadlessChrome", "Chrome");
+                let _ = page.set_user_agent(ua.clone()).await;
+                *UA.lock().unwrap() = Some(ua);
+            }
+        }
         *g = Some(Inner { browser, page: page.clone(), handler });
         Ok(page)
     }
@@ -152,7 +169,24 @@ impl Session {
     pub async fn new_page(&self) -> Result<Page> {
         self.start().await?;
         let g = self.inner.lock().await;
-        Ok(g.as_ref().unwrap().browser.new_page("about:blank").await?)
+        let p = g.as_ref().unwrap().browser.new_page("about:blank").await?;
+        let ua = UA.lock().unwrap().clone();
+        if let Some(ua) = ua {
+            let _ = p.set_user_agent(ua).await;
+        }
+        Ok(p)
+    }
+
+    /// Copy cookies (CDP JSON format, e.g. from the login window) into the browser.
+    pub async fn inject_cookies(&self, cookies: &[Value]) -> Result<usize> {
+        self.start().await?;
+        let params: Vec<CookieParam> = cookies.iter().filter_map(cookie_param).collect();
+        let n = params.len();
+        let g = self.inner.lock().await;
+        g.as_ref().unwrap().browser.set_cookies(params).await?;
+        drop(g);
+        self.save_cookies().await;
+        Ok(n)
     }
     pub async fn is_open(&self) -> bool {
         self.inner.lock().await.is_some()
@@ -247,6 +281,7 @@ impl Session {
     /// Navigate and wait until `is_done(url, page)`. If the flow stops on a login page, tell the
     /// student and wait (up to `login_timeout`) for them to complete it.
     pub async fn goto(&self, page: &Page, url: &str, is_done: &DoneFn<'_>, timeout: Duration) -> Result<String> {
+        *self.target.lock().unwrap() = url.to_string();
         // don't wait for the load event: SSO pages keep loading; is_done polls the state instead
         let _ = tokio::time::timeout(Duration::from_secs(20), page.execute(NavigateParams::new(url))).await;
         self.wait_for(page, is_done, timeout, Duration::from_secs(15 * 60)).await
@@ -255,6 +290,7 @@ impl Session {
     pub async fn wait_for(&self, page: &Page, is_done: &DoneFn<'_>, timeout: Duration, login_timeout: Duration) -> Result<String> {
         let mut deadline = Instant::now() + timeout;
         let mut notified = false;
+        let mut logins = 0;
         let mut login_since: Option<Instant> = None;
         let mut assisted = String::new();
         loop {
@@ -274,12 +310,32 @@ impl Session {
                     assisted = host;
                     let _ = self.auto_assist_login(page).await;
                 }
-                if since.elapsed() > Duration::from_secs(10) && !notified {
-                    notified = true;
-                    deadline = Instant::now() + login_timeout;
-                    self.log("🔐 Login richiesto: completa l'accesso nella finestra di Chrome...");
-                    (self.on_login_required)(u.clone());
-                    let _ = page.bring_to_front().await;
+                if since.elapsed() > Duration::from_secs(if self.headless { 6 } else { 10 }) {
+                    if self.headless {
+                        // hidden browser: log in in a visible window, then copy the cookies here
+                        if logins >= 2 {
+                            self.debug_snapshot(page, "login").await;
+                            bail!("Login non riuscito: la pagina di accesso continua a ripresentarsi");
+                        }
+                        logins += 1;
+                        notified = true;
+                        self.log("🔐 Serve il login PoliMi: completa l'accesso nella finestra che si è aperta");
+                        let t = self.target.lock().unwrap().clone();
+                        let target = if t.is_empty() { u.clone() } else { t };
+                        let cookies = (self.login)(target.clone(), u.clone()).await?;
+                        self.inject_cookies(&cookies).await?;
+                        let _ = tokio::time::timeout(Duration::from_secs(20), page.execute(NavigateParams::new(target))).await;
+                        login_since = None;
+                        assisted.clear();
+                        deadline = Instant::now() + timeout;
+                    } else if !notified {
+                        notified = true;
+                        deadline = Instant::now() + login_timeout;
+                        self.log("🔐 Login richiesto: completa l'accesso nella finestra di Chrome...");
+                        let target = self.target.lock().unwrap().clone();
+                        let _ = page.bring_to_front().await;
+                        let _ = (self.login)(target, format!("visible:{u}")).await;
+                    }
                 }
                 if !notified {
                     deadline = deadline.max(Instant::now() + timeout);
@@ -345,6 +401,83 @@ impl Session {
             i.handler.abort();
         }
     }
+}
+
+static UA: std::sync::LazyLock<std::sync::Mutex<Option<String>>> = std::sync::LazyLock::new(Default::default);
+
+/// CDP / Electron cookie (JSON) → CookieParam.
+fn cookie_param(c: &Value) -> Option<CookieParam> {
+    let mut o = serde_json::json!({ "name": c["name"], "value": c["value"], "domain": c["domain"], "path": c.get("path").cloned().unwrap_or(serde_json::json!("/")), "secure": util::b(c, "secure"), "httpOnly": util::b(c, "httpOnly") });
+    if let Some(ss) = c["sameSite"].as_str().filter(|s| matches!(*s, "Strict" | "Lax" | "None")) {
+        o["sameSite"] = serde_json::json!(ss);
+    }
+    let exp = util::f(c, "expires");
+    if !util::b(c, "session") && exp > 0.0 {
+        o["expires"] = serde_json::json!(exp);
+    }
+    serde_json::from_value(o).ok()
+}
+
+/// Visible login without the app (CLI / MCP): a small Chrome window in "app" mode (no tabs, no address bar)
+/// with its own profile, closed as soon as the student is logged in. Returns its cookies.
+pub async fn visible_login(target: &str, email: &str, log: Log) -> Result<Vec<Value>> {
+    let dir = paths::app_dir().join("login-profile");
+    std::fs::create_dir_all(&dir)?;
+    let cfg = BrowserConfig::builder()
+        .chrome_executable(find_chrome()?)
+        .with_head()
+        .hide()
+        .user_data_dir(&dir)
+        .viewport(None)
+        .disable_default_args()
+        .args(["--lang=it-IT", "--window-size=520,760", "--no-first-run", "--no-default-browser-check", "--disable-sync", "--password-store=basic", "--use-mock-keychain", &format!("--app={target}")])
+        .launch_timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| anyhow!("{e}"))?;
+    let (mut browser, mut h) = Browser::launch(cfg).await.map_err(|e| anyhow!("Avvio di Chrome non riuscito: {e}"))?;
+    let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let a2 = alive.clone();
+    let handler = tokio::spawn(async move {
+        while h.next().await.is_some() {}
+        a2.store(false, std::sync::atomic::Ordering::Relaxed);
+    });
+    log("🔐 Accedi al Politecnico nella finestra di login".into());
+    let target_host = reqwest::Url::parse(target).ok().and_then(|u| u.host_str().map(String::from)).unwrap_or_default();
+    let t0 = Instant::now();
+    let mut saw_login = false;
+    let mut typed = false;
+    let r: Result<Vec<Value>> = loop {
+        if !alive.load(std::sync::atomic::Ordering::Relaxed) {
+            break Err(anyhow!("Login annullato: finestra chiusa"));
+        }
+        if t0.elapsed() > Duration::from_secs(15 * 60) {
+            break Err(anyhow!("Login non completato entro 15 minuti"));
+        }
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let Some(page) = browser.pages().await.ok().and_then(|p| p.into_iter().next()) else { continue };
+        let u = page.url().await.ok().flatten().unwrap_or_default();
+        if is_login_url(&u) {
+            saw_login = true;
+            static IDB: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"idbroker(-\w+)?\.webex\.com").unwrap());
+            if IDB.is_match(&u) && !email.is_empty() && !typed {
+                typed = true;
+                let _ = eval(&page, &format!("(() => {{ const i = document.querySelector('#IDToken1, input[type=\"email\"]'); if (i) {{ i.value = {}; i.dispatchEvent(new Event('input', {{ bubbles: true }})); }} }})()", serde_json::to_string(email)?)).await;
+            }
+            continue;
+        }
+        let host = reqwest::Url::parse(&u).ok().and_then(|x| x.host_str().map(String::from)).unwrap_or_default();
+        let ready = eval(&page, "document.readyState === 'complete'").await.ok().and_then(|v| v.as_bool()).unwrap_or(false);
+        if ready && !host.is_empty() && (saw_login || host == target_host) {
+            match browser.get_cookies().await {
+                Ok(c) => break Ok(c.iter().filter_map(|c| serde_json::to_value(c).ok()).collect()),
+                Err(e) => break Err(anyhow!("{e}")),
+            }
+        }
+    };
+    let _ = tokio::time::timeout(Duration::from_secs(5), browser.close()).await;
+    let _ = tokio::time::timeout(Duration::from_secs(5), browser.wait()).await;
+    handler.abort();
+    r
 }
 
 fn process_alive(pid: i32) -> bool {

@@ -12,34 +12,38 @@
     <div id="app">
         <aside id="sidebar">
             <div class="drag"></div>
-            <div class="brand"><span class="logo">●</span><span>PoliRec</span><span class="grow"></span><button class="icon ghost small sb-btn" id="sb-hide" title="Nascondi barra laterale (⌘\)">⇤</button></div>
+            <div class="brand"><span class="logo"></span><span>PoliRec</span><span class="grow"></span><button class="icon ghost small sb-btn" id="sb-hide" title="Nascondi barra laterale (⌘\)" aria-label="Nascondi barra laterale"><span data-icon="sidebar"></span></button></div>
+            <button id="sb-search" class="sb-search" aria-label="Apri la command palette"><span data-icon="search"></span><span class="grow">Cerca o esegui…</span><kbd class="mod">K</kbd></button>
             <nav class="nav">
-                <a data-route="dashboard" class="nav-item"><span class="ico">⌂</span>Dashboard</a>
-                <a data-route="notes" class="nav-item"><span class="ico">✎</span>Appunti</a>
-                <a data-route="calendar" class="nav-item"><span class="ico">▦</span>Calendario</a>
-                <a data-route="rooms" class="nav-item"><span class="ico">⌖</span>Aule libere</a>
-                <a data-route="todos" class="nav-item"><span class="ico">☑</span>Da fare</a>
+                <a data-route="dashboard" class="nav-item" data-keys="1"><span class="ico" data-icon="home"></span>Dashboard</a>
+                <a data-route="notes" class="nav-item" data-keys="2"><span class="ico" data-icon="note"></span>Appunti</a>
+                <a data-route="calendar" class="nav-item" data-keys="3"><span class="ico" data-icon="calendar"></span>Calendario</a>
+                <a data-route="rooms" class="nav-item" data-keys="4"><span class="ico" data-icon="pin"></span>Aule libere</a>
+                <a data-route="todos" class="nav-item" data-keys="5"><span class="ico" data-icon="check"></span>Da fare</a>
             </nav>
             <div class="nav-label">Corsi</div>
             <nav id="side-courses" class="nav courses"></nav>
             <div id="pomo" class="pomo"></div>
             <nav class="nav">
-                <a data-route="community" class="nav-item"><span class="ico">✦</span>Community</a>
-                <a data-route="settings" class="nav-item"><span class="ico">⚙</span>Impostazioni</a>
+                <a data-route="community" class="nav-item"><span class="ico" data-icon="users"></span>Community</a>
+                <a data-route="settings" class="nav-item" data-keys=","><span class="ico" data-icon="settings"></span>Impostazioni</a>
             </nav>
-            <div id="side-status" class="side-status"></div>
+            <div id="side-status" class="side-status hidden"></div>
         </aside>
         <div id="sb-hot" title=""></div>
         <main id="main">
-            <button class="icon ghost small sb-btn" id="sb-show" title="Mostra barra laterale (⌘\)">☰</button>
+            <button class="icon ghost small sb-btn" id="sb-show" title="Mostra barra laterale (⌘\)" aria-label="Mostra barra laterale"><span data-icon="sidebar"></span></button>
             <div class="drag top"></div>
             <div id="banner" class="banner hidden"></div>
             <div id="view"></div>
             <footer id="activity" class="activity">
-                <button id="act-toggle" class="activity-head">
-                    <span id="act-dot" class="dot idle"></span><span id="act-text">Pronto</span><span class="grow"></span><span class="chev">⌃</span>
-                </button>
-                <pre id="log"></pre>
+                <div id="act-panel" class="act-panel" aria-label="Attività in background"></div>
+                <div class="act-bar">
+                    <button id="act-toggle" class="act-status" title="Registro attività (⌘J)"><span id="act-dot" class="dot idle"></span><span id="act-text">Pronto</span></button>
+                    <span class="grow"></span>
+                    <span id="act-chips" class="act-chips"></span>
+                    <button id="act-open" class="act-open" title="Download, trascrizioni e AI in background (⌘J)"><span data-icon="terminal"></span>Attività<span class="chev">⌃</span></button>
+                </div>
             </footer>
         </main>
     </div>
@@ -50,6 +54,8 @@
     <script src="app.js"></script>
     <script src="views.js"></script>
     <script src="ai-ui.js"></script>
+    <script src="palette.js"></script>
+    <script src="activity-ui.js"></script>
     <script src="vendor/leaflet/leaflet.js"></script>
     <script src="rooms-ui.js"></script>
 </body>

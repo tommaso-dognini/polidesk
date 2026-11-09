@@ -8,7 +8,11 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
+/// launch time (ms): the app restarts the daemon when its binary is newer
+static STARTED: std::sync::LazyLock<i64> = std::sync::LazyLock::new(polirec_core::util::now_ms);
+
 pub async fn run() -> Result<()> {
+    let _ = *STARTED;
     // a second instance just exits: the first one already serves this data dir
     if rpc::connect_raw().await.is_ok() {
         eprintln!("polirecd è già attivo ({})", paths::socket_path().display());
@@ -67,6 +71,7 @@ async fn serve<S: AsyncRead + AsyncWrite + Send + 'static>(d: Arc<Daemon>, s: S)
         }
     });
     let mut client = String::from("?");
+    let mut is_ui = false;
     let mut lines = BufReader::new(r).lines();
     while let Ok(Some(l)) = lines.next_line().await {
         let Ok(req) = serde_json::from_str::<Value>(&l) else { continue };
@@ -76,7 +81,11 @@ async fn serve<S: AsyncRead + AsyncWrite + Send + 'static>(d: Arc<Daemon>, s: S)
         match method.as_str() {
             "hello" => {
                 client = params.get("client").and_then(Value::as_str).unwrap_or("?").to_string();
-                let _ = tx.send(json!({ "id": id, "result": { "protocol": rpc::PROTOCOL, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id(), "methods": dispatch::METHODS } }).to_string());
+                if client == "electron" && !is_ui {
+                    is_ui = true;
+                    d.ui_clients.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+                let _ = tx.send(json!({ "id": id, "result": { "protocol": rpc::PROTOCOL, "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id(), "started": *STARTED, "exe": std::env::current_exe().ok(), "methods": dispatch::METHODS } }).to_string());
             }
             "subscribe" => {
                 let mut ev = d.events.subscribe();
@@ -107,6 +116,9 @@ async fn serve<S: AsyncRead + AsyncWrite + Send + 'static>(d: Arc<Daemon>, s: S)
                 });
             }
         }
+    }
+    if is_ui {
+        d.ui_clients.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
     drop(tx);
     drop(writer); // ends by itself once the socket is gone

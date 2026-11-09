@@ -1,13 +1,16 @@
 # Risoluzione dei problemi
 
-Il pannello **Attività** in fondo alla finestra (freccia ⌃ in basso a destra) mostra il log in tempo reale.
+Il pannello **Attività** (in basso a destra, oppure ⌘J) mostra cosa sta succedendo e il **Registro** di tutte le operazioni, con un filtro «Problemi».
 Se una pagina del Politecnico non si comporta come previsto, screenshot e HTML vengono salvati in `~/.polirec/debug/`.
 
 ## Login e sincronizzazione
 
 | Problema | Soluzione |
 |---|---|
-| «Login richiesto» e si apre Chrome | Normale alla prima sincronizzazione o quando la sessione scade: completa l'accesso PoliMi/SPID nella finestra di Chrome |
+| Si apre «Accedi al Politecnico» | Normale alla prima sincronizzazione o quando la sessione scade: accedi con PoliMi/SPID, la finestra si chiude da sola |
+| Il login non va avanti | Attiva *Impostazioni → Sincronizzazione → Mostra il browser* e riprova: vedrai Chrome e potrai accedere lì |
+| «Collega il disco…» | La cartella del corso è su un disco esterno scollegato: collegalo e PoliRec risincronizza da solo. Per spostare il corso: *Impostazioni del corso → Cartella* |
+| Un download o una trascrizione non parte | Controlla nel pannello Attività che non sia in pausa (⏸) |
 | «Google Chrome non trovato» | Installa Chrome, oppure avvia con `POLIREC_CHROME=/percorso/di/chrome` |
 | Il profilo di Chrome è «in uso» | Un'altra sincronizzazione (app o CLI) sta usando il profilo: PoliRec attende che finisca. Se rimane bloccato, chiudi le finestre di Chrome aperte da PoliRec |
 | Nessuna registrazione trovata | Controlla che il corso abbia un archivio delle registrazioni (RecMan o link WebEx). Puoi aggiungere i link a mano in *Impostazioni del corso → Link extra* |

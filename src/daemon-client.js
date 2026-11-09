@@ -67,7 +67,9 @@ class DaemonClient {
             const hello = await this.call('hello', { client: 'electron', protocol: PROTOCOL });
             // the app was updated: replace the old daemon (it keeps running across app restarts)
             const want = this.bundledVersion();
-            if (want && hello.version !== want) {
+            let newer = false;
+            try { newer = hello.exe && path.resolve(hello.exe) === path.resolve(this.bin) && fs.statSync(this.bin).mtimeMs > hello.started + 1000; } catch (e) { }
+            if ((want && hello.version !== want) || newer) {
                 this.log(`polirecd ${hello.version} → ${want}`);
                 await this.call('daemon:shutdown').catch(() => { });
                 this.detach();

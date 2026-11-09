@@ -7,6 +7,7 @@ pub mod cleaner;
 pub mod cloud;
 pub mod config;
 pub mod downloader;
+pub mod drives;
 pub mod indexpage;
 pub mod integrations;
 pub mod library;

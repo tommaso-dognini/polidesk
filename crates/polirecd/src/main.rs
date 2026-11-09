@@ -4,6 +4,7 @@
 //! WeBeep/RecMan/WebEx, semantic index. The Electron app, the `polirec` CLI and the MCP server are
 //! thin clients that talk to it over a local socket (see `polirec_core::rpc`), so downloads and
 //! transcriptions keep running when the window is closed and every client sees the same state.
+mod activity;
 mod api_methods;
 mod daemon;
 mod dispatch;

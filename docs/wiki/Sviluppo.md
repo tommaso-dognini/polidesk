@@ -114,6 +114,7 @@ Gli errori del renderer compaiono nel terminale come `[renderer] …`.
 |---|---|
 | `POLIREC_HOME` | Cartella dei dati al posto di `~/.polirec` |
 | `POLIREC_CHROME` | Percorso di Chrome, se non viene trovato da solo |
+| `POLIREC_SHOW_BROWSER` | Chrome visibile invece che in background (come l'opzione «Mostra il browser») |
 | `POLIREC_NO_ARIA2` | Usa il downloader interno anche se `aria2c` è installato |
 | `POLIREC_SMOKE`, `POLIREC_SMOKE_JS` | Screenshot automatico (vedi sopra) |
 | `POLIREC_APP_ROOT`, `POLIREC_FFMPEG` | Cartella dell'app (script `python/`) e ffmpeg incluso; di solito le scrive l'app in `~/.polirec/runtime.json` |

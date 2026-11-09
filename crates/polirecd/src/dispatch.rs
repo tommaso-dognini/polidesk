@@ -22,6 +22,9 @@ pub const METHODS: &[&str] = &[
     "setup:detect", "setup:install", "setup:skip", "hw", "engine:set", "dictate", "transcripts:clean",
     "cal:sync", "cal:importText", "cal:importIcs", "cal:events", "cal:icsPath", "rooms:spaces", "rooms:status", "rooms:photo", "rooms:free",
     "assistant:info", "assistant:addClaude",
+    "activity:list", "activity:log", "download:pause", "download:resume", "downloads:pauseAll", "downloads:resumeAll",
+    "transcribe:pause", "transcribe:resume", "transcriptions:pauseAll", "transcriptions:resumeAll",
+    "drives:status", "drive:wait", "login:done", "login:cancel",
 ];
 
 /// Run blocking filesystem work off the async workers.
@@ -55,6 +58,7 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
             st["tools"] = util::merge(&tools::check(), &json!({ "whisper": whisper_engine(if py.is_empty() { "python3" } else { &py }).await, "ai": ai::available() }));
             st["templates"] = ai::template_labels();
             st["transcribing"] = json!(d.transcriber.pending());
+            st["transcriptionJobs"] = json!(d.transcriber.list());
             Ok(st)
         }
         "app:ready" => {
@@ -317,6 +321,7 @@ pub fn course_view(c: &Value) -> Value {
             "recordings": lib::with_file_status(&dir, &m),
             "materialsCount": m["materials"].as_object().map(|o| o.len()).unwrap_or(0),
             "dirExists": dir.exists(),
+            "drive": polirec_core::drives::info(&dir),
             "materialFiles": mats,
         }),
     )

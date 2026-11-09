@@ -18,10 +18,61 @@ pub struct Opts {
     pub only_materials: bool,
     pub materials: Option<bool>,
     pub stop: Arc<AtomicBool>,
+    pub control: Arc<Control>,
 }
 impl Default for Opts {
     fn default() -> Self {
-        Opts { parallel: 3, dry_run: false, limit: None, only_materials: false, materials: None, stop: Arc::new(AtomicBool::new(false)) }
+        Opts { parallel: 3, dry_run: false, limit: None, only_materials: false, materials: None, stop: Arc::new(AtomicBool::new(false)), control: Default::default() }
+    }
+}
+
+/// Pause / resume of single downloads ("<course id>:<recording key>") or of all of them.
+/// Paused downloads keep their .part file and resume where they stopped (aria2c / range requests).
+#[derive(Default)]
+pub struct Control {
+    all: AtomicBool,
+    paused: std::sync::Mutex<std::collections::HashSet<String>>,
+    active: std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Notify>>>,
+}
+impl Control {
+    pub fn id(course: &str, key: &str) -> String {
+        format!("{course}:{key}")
+    }
+    pub fn is_paused(&self, id: &str) -> bool {
+        self.all.load(Ordering::Relaxed) || self.paused.lock().unwrap().contains(id)
+    }
+    pub fn all_paused(&self) -> bool {
+        self.all.load(Ordering::Relaxed)
+    }
+    pub fn paused_ids(&self) -> Vec<String> {
+        self.paused.lock().unwrap().iter().cloned().collect()
+    }
+    /// Pause one download (stops it now if running).
+    pub fn pause(&self, id: &str) {
+        self.paused.lock().unwrap().insert(id.to_string());
+        if let Some(n) = self.active.lock().unwrap().get(id) {
+            n.notify_one();
+        }
+    }
+    pub fn resume(&self, id: &str) {
+        self.paused.lock().unwrap().remove(id);
+    }
+    pub fn pause_all(&self) {
+        self.all.store(true, Ordering::Relaxed);
+        for n in self.active.lock().unwrap().values() {
+            n.notify_one();
+        }
+    }
+    pub fn resume_all(&self) {
+        self.all.store(false, Ordering::Relaxed);
+        self.paused.lock().unwrap().clear();
+    }
+    pub fn restore(&self, all: bool, ids: Vec<String>) {
+        self.all.store(all, Ordering::Relaxed);
+        *self.paused.lock().unwrap() = ids.into_iter().collect();
+    }
+    pub fn is_active(&self, id: &str) -> bool {
+        self.active.lock().unwrap().contains_key(id)
     }
 }
 
@@ -178,6 +229,9 @@ pub async fn sync_course(s: &Arc<Session>, course: &Value, opts: &Opts, emit: Em
                 r["webexUrl"] = prev["webexUrl"].clone();
             }
             r["status"] = if util::truthy(prev.get("status")) { prev["status"].clone() } else { json!("new") };
+            if r["status"] == json!("paused") && !opts.control.is_paused(&Control::id(&course_id, key)) {
+                r["status"] = json!("new");
+            }
             m["recordings"][key] = r;
             let file = lib::assign_filename(&m, key, &m["recordings"][key].clone());
             m["recordings"][key]["file"] = json!(file);
@@ -233,6 +287,9 @@ pub async fn sync_course(s: &Arc<Session>, course: &Value, opts: &Opts, emit: Em
     }
     ctx.log(format!("📋 {} registrazioni trovate, {} da scaricare{}", found.len(), todo.len(), opts.limit.map(|l| format!(" (limite {l})")).unwrap_or_default()));
     emit(json!({ "type": "summary", "course": course_id, "total": found.len(), "todo": todo.len() }));
+    for r in &todo {
+        emit(json!({ "type": "download-queued", "course": course_id, "key": r["key"], "file": r["file"], "title": lib::pretty_topic(r), "date": r["isoDate"] }));
+    }
 
     // course material — only when enabled for this course
     let want_materials = opts.materials.unwrap_or_else(|| course["materials"].as_bool() == Some(true));
@@ -265,7 +322,7 @@ pub async fn sync_course(s: &Arc<Session>, course: &Value, opts: &Opts, emit: Em
         if should_stop() {
             break;
         }
-        let job = Download { ctx: ctx.clone(), s: s.clone(), serial: serial.clone(), emit: emit.clone(), password: password.clone(), ok: ok.clone(), failed: failed.clone() };
+        let job = Download { ctx: ctx.clone(), s: s.clone(), serial: serial.clone(), emit: emit.clone(), password: password.clone(), ok: ok.clone(), failed: failed.clone(), control: opts.control.clone() };
         set.spawn(async move {
             let _permit = permit;
             job.run(r0).await;
@@ -286,20 +343,41 @@ struct Download {
     password: String,
     ok: Arc<AtomicUsize>,
     failed: Arc<AtomicUsize>,
+    control: Arc<Control>,
 }
 impl Download {
+    async fn paused(&self, key: &str) {
+        self.ctx.set_rec(key, |x| x["status"] = json!("paused")).await;
+        self.ctx.save().await;
+        (self.emit)(json!({ "type": "download-paused", "course": self.ctx.course_id, "key": key }));
+        self.ctx.log(format!("⏸ In pausa: {}", util::s(&self.ctx.rec(key).await, "file")));
+    }
     async fn run(self, r0: Value) {
         let ctx = &self.ctx;
         let key = util::s(&r0, "key").to_string();
         let file = util::s(&r0, "file").to_string();
         let dest = ctx.dir.join(lib::DIR_VIDEO).join(&file);
+        let id = Control::id(&ctx.course_id, &key);
+        if self.control.is_paused(&id) {
+            return self.paused(&key).await;
+        }
+        let stop = Arc::new(tokio::sync::Notify::new());
+        self.control.active.lock().unwrap().insert(id.clone(), stop.clone());
         ctx.set_rec(&key, |r| {
             r["status"] = json!("downloading");
             r.as_object_mut().map(|o| o.remove("error"));
         })
         .await;
         ctx.save().await;
-        match self.fetch(&key, &file, &dest).await {
+        (self.emit)(json!({ "type": "download-start", "course": ctx.course_id, "key": key, "file": file, "title": lib::pretty_topic(&r0) }));
+        // pausing drops the download future: aria2c / ffmpeg are killed, the .part file stays for resuming
+        let res = tokio::select! {
+            r = self.fetch(&key, &file, &dest) => Some(r),
+            _ = stop.notified() => None,
+        };
+        self.control.active.lock().unwrap().remove(&id);
+        let Some(res) = res else { return self.paused(&key).await };
+        match res {
             Ok(()) => {
                 ctx.set_rec(&key, |x| {
                     x["status"] = json!("downloaded");
@@ -319,6 +397,7 @@ impl Download {
                 .await;
                 self.failed.fetch_add(1, Ordering::Relaxed);
                 ctx.log(format!("  ✗ {file}: {msg}"));
+                (self.emit)(json!({ "type": "download-error", "course": ctx.course_id, "key": key, "error": msg }));
             }
         }
         ctx.save().await;

@@ -44,9 +44,70 @@ const daemon = new DaemonClient({
     log: m => console.log('[polirecd]', m),
     onEvent: e => {
         if (e.type === 'notify') return notify(e.body);
+        if (e.type === 'login-required' && e.id) openLogin(e);
         send(e);
     },
 });
+
+// ---------- login window ----------
+// Sync runs in a hidden Chrome. When PoliMi/SPID/WebEx asks for a login, the student does it here, in an
+// app window with its own persistent session; its cookies are then handed to the hidden browser.
+const LOGIN_RX = [
+    /webeep\.polimi\.it\/login\//, /aunicalogin\.polimi\.it\/aunicalogin\/(aunicalogin\.jsp|federato|login)/, /spid\.polimi\.it/, /login\.polimi\.it/, /idp\.polimi\.it/,
+    /posteid\.poste\.it/, /infocert\.it/, /aruba\.it/, /namirial/, /sielte/, /tim\.it/, /lepida/, /intesa\.it/, /register\.it/, /etna/, /teamsystem/,
+    /webex\.com\/.*(signin|login)/i, /idbroker(-\w+)?\.webex\.com/,
+];
+const isLogin = u => LOGIN_RX.some(r => r.test(u));
+const SAME_SITE = { no_restriction: 'None', lax: 'Lax', strict: 'Strict' };
+/** Electron cookie → Chrome DevTools Protocol cookie */
+const toCdp = c => ({ name: c.name, value: c.value, domain: c.domain, path: c.path || '/', secure: !!c.secure, httpOnly: !!c.httpOnly, session: !!c.session, expires: c.expirationDate || -1, ...(SAME_SITE[c.sameSite] ? { sameSite: SAME_SITE[c.sameSite] } : {}) });
+const logins = new Map();
+
+function openLogin({ id, url, email }) {
+    if (logins.has(id)) return;
+    let targetHost = ''; try { targetHost = new URL(url).host; } catch (e) { }
+    const lw = new BrowserWindow({
+        width: 540, height: 780, minWidth: 420, minHeight: 560, title: 'Accedi al Politecnico', parent: win && !win.isDestroyed() ? win : undefined,
+        autoHideMenuBar: true, backgroundColor: '#ffffff', show: false,
+        webPreferences: { partition: 'persist:polirec-login', contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    logins.set(id, lw);
+    let sawLogin = false, done = false, assisted = '';
+    const check = async () => {
+        if (done || lw.isDestroyed()) return;
+        const u = lw.webContents.getURL();
+        if (isLogin(u)) {
+            sawLogin = true;
+            if (!lw.isVisible()) { lw.show(); lw.focus(); }
+            // same help as the hidden browser: e-mail on the WebEx broker, SSO button on WeBeep
+            const host = u.split('?')[0];
+            if (assisted !== host) {
+                assisted = host;
+                const js = /idbroker(-\w+)?\.webex\.com/.test(u) && email
+                    ? `(() => { const i = document.querySelector('#IDToken1, input[type="email"], input[name="email"]'); if (i && !i.value) { i.value = ${JSON.stringify(email)}; i.dispatchEvent(new Event('input', { bubbles: true })); } })()`
+                    : /webeep\.polimi\.it\/login\/index\.php/.test(u)
+                        ? `(() => { const a = [...document.querySelectorAll('a')].find(a => /auth\\/(shibboleth|saml|oauth)|auth=/.test(a.href) || /polimi|accedi con/i.test(a.innerText)); if (a) a.click(); })()`
+                        : '';
+                if (js) setTimeout(() => !lw.isDestroyed() && lw.webContents.executeJavaScript(js).catch(() => { }), 700);
+            }
+            return;
+        }
+        let host = ''; try { host = new URL(u).host; } catch (e) { }
+        if (!lw.webContents.isLoading() && host && (sawLogin || host === targetHost)) {
+            done = true;
+            const cookies = (await lw.webContents.session.cookies.get({})).map(toCdp);
+            await daemon.request('login:done', { id, cookies }).catch(() => { });
+            send({ type: 'login-done' });
+            lw.close();
+        }
+    };
+    for (const ev of ['did-finish-load', 'did-navigate', 'did-navigate-in-page', 'did-stop-loading']) lw.webContents.on(ev, () => setTimeout(check, 300));
+    lw.webContents.setWindowOpenHandler(({ url: u }) => { lw.loadURL(u); return { action: 'deny' }; });
+    // already logged in (cookies of this window still valid): it finishes without showing itself
+    setTimeout(() => { if (!done && !lw.isDestroyed() && !lw.isVisible()) { lw.show(); lw.focus(); } }, 4000);
+    lw.on('closed', () => { logins.delete(id); if (!done) { daemon.request('login:cancel', { id }).catch(() => { }); send({ type: 'login-done', cancelled: true }); } });
+    lw.loadURL(url);
+}
 
 // ---------- IPC ----------
 // binary payloads (pasted images, dictation audio) travel as base64

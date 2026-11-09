@@ -20,6 +20,12 @@ struct Job {
 struct State {
     queue: VecDeque<Job>,
     current: Option<PathBuf>,
+    percent: f64,
+    /// paused videos stay in the queue and are skipped; "all" holds the whole queue
+    paused: std::collections::HashSet<PathBuf>,
+    all_paused: bool,
+    /// the running job was paused: put it back in the queue instead of failing it
+    requeue: bool,
 }
 
 pub struct Transcriber {
@@ -41,6 +47,77 @@ impl Transcriber {
     pub fn pending(&self) -> Vec<String> {
         let s = self.st.lock().unwrap();
         s.queue.iter().map(|j| j.video.to_string_lossy().into_owned()).chain(s.current.iter().map(|c| c.to_string_lossy().into_owned())).collect()
+    }
+
+    /// Every job with its state: running | queued | paused.
+    pub fn list(&self) -> Vec<Value> {
+        let s = self.st.lock().unwrap();
+        let mut out = vec![];
+        if let Some(c) = &s.current {
+            out.push(json!({ "video": c, "status": "running", "percent": s.percent }));
+        }
+        for j in &s.queue {
+            let paused = s.all_paused || s.paused.contains(&j.video);
+            out.push(json!({ "video": j.video, "status": if paused { "paused" } else { "queued" }, "percent": 0 }));
+        }
+        out
+    }
+    pub fn all_paused(&self) -> bool {
+        self.st.lock().unwrap().all_paused
+    }
+    pub fn paused_videos(&self) -> Vec<PathBuf> {
+        self.st.lock().unwrap().paused.iter().cloned().collect()
+    }
+    pub fn restore(&self, all: bool, videos: Vec<PathBuf>) {
+        let mut s = self.st.lock().unwrap();
+        s.all_paused = all;
+        s.paused = videos.into_iter().collect();
+    }
+    /// Pause one video: a queued one is skipped, the running one is stopped and goes back in the queue
+    /// (Whisper can't resume halfway: it starts again from the beginning).
+    pub fn pause(&self, video: &Path) {
+        let running = {
+            let mut s = self.st.lock().unwrap();
+            s.paused.insert(video.to_path_buf());
+            let r = s.current.as_deref() == Some(video);
+            if r {
+                s.requeue = true;
+            }
+            r
+        };
+        if running {
+            self.cancel.notify_waiters();
+        }
+        (self.emit)(json!({ "type": "transcribe-paused", "video": video }));
+    }
+    pub fn resume(&self, video: &Path) {
+        self.st.lock().unwrap().paused.remove(video);
+        (self.emit)(json!({ "type": "transcribe-resumed", "video": video }));
+        self.wake.notify_one();
+    }
+    pub fn pause_all(&self) {
+        let running = {
+            let mut s = self.st.lock().unwrap();
+            s.all_paused = true;
+            let r = s.current.is_some();
+            if r {
+                s.requeue = true;
+            }
+            r
+        };
+        if running {
+            self.cancel.notify_waiters();
+        }
+        (self.emit)(json!({ "type": "transcribe-paused", "all": true }));
+    }
+    pub fn resume_all(&self) {
+        {
+            let mut s = self.st.lock().unwrap();
+            s.all_paused = false;
+            s.paused.clear();
+        }
+        (self.emit)(json!({ "type": "transcribe-resumed", "all": true }));
+        self.wake.notify_one();
     }
 
     /// Queue a video; None when it is already queued. The receiver gets the script's "done" event.
@@ -67,13 +144,31 @@ impl Transcriber {
     async fn worker(self: Arc<Self>) {
         loop {
             let job = loop {
-                if let Some(j) = self.st.lock().unwrap().queue.pop_front() {
-                    break j;
+                {
+                    let mut s = self.st.lock().unwrap();
+                    if !s.all_paused {
+                        if let Some(i) = s.queue.iter().position(|j| !s.paused.contains(&j.video)) {
+                            break s.queue.remove(i).unwrap();
+                        }
+                    }
                 }
                 self.wake.notified().await;
             };
-            self.st.lock().unwrap().current = Some(job.video.clone());
+            {
+                let mut s = self.st.lock().unwrap();
+                s.current = Some(job.video.clone());
+                s.percent = 0.0;
+                s.requeue = false;
+            }
             let r = self.run(&job).await;
+            let requeue = std::mem::take(&mut self.st.lock().unwrap().requeue);
+            if requeue && r.is_err() {
+                // paused while running: back to the front of the queue, keeps its receiver
+                let mut s = self.st.lock().unwrap();
+                s.current = None;
+                s.queue.push_front(job);
+                continue;
+            }
             let vs = job.video.to_string_lossy().into_owned();
             match &r {
                 Ok(res) => (self.emit)(json!({ "type": "transcribe-done", "video": vs, "files": res["files"] })),
@@ -112,7 +207,10 @@ impl Transcriber {
             while let Ok(Some(l)) = lines.next_line().await {
                 let Ok(ev) = serde_json::from_str::<Value>(&l) else { continue };
                 match util::s(&ev, "event") {
-                    "progress" => emit(json!({ "type": "transcribe-progress", "video": vs, "percent": ev["percent"] })),
+                    "progress" => {
+                        self.st.lock().unwrap().percent = ev["percent"].as_f64().unwrap_or(0.0);
+                        emit(json!({ "type": "transcribe-progress", "video": vs, "percent": ev["percent"] }))
+                    }
                     "start" => emit(json!({ "type": "transcribe-start", "video": vs })),
                     "loaded" => emit(json!({ "type": "log", "msg": format!("🎙  Whisper ({}, {}) pronto", util::s(&ev, "engine"), util::s(&ev, "model")) })),
                     "done" => result = Some(ev),

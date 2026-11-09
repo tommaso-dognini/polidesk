@@ -72,6 +72,34 @@ Dati pubblici del Politecnico. Idea di PoliAule e @alpolimibot.
 - **Da fare**: per corso o generali, con scadenza; compaiono nel calendario.
 - **Pomodoro**: nella barra laterale. Si può assegnare a un corso e le statistiche compaiono nella Panoramica. Durate in Impostazioni.
 
+## Attività in background
+
+La barra in fondo alla finestra è sempre visibile. A sinistra c'è l'ultima operazione, a destra quello che sta girando:
+download (⬇ con percentuale), trascrizioni (🎙), AI (✨), elementi in pausa e dischi esterni non collegati.
+
+**Attività** (o ⌘J) apre il pannello:
+- **In corso**: sincronizzazione, download, trascrizioni e coda AI. Ogni download e ogni trascrizione si mette in
+  pausa e si riprende singolarmente (⏸ / ▶), oppure tutti insieme. Un download in pausa riparte da dove si era fermato;
+  una trascrizione in pausa riparte dall'inizio. Le pause restano valide anche dopo aver chiuso l'app.
+- **Registro**: tutto quello che è successo, anche a finestra chiusa, con filtri (problemi, sincronizzazione, download,
+  trascrizioni, AI), ricerca e copia.
+
+Le operazioni continuano anche chiudendo la finestra: le esegue il motore di PoliRec (`polirecd`) in background.
+
+## Login e browser
+
+La sincronizzazione usa Chrome **in background, senza finestre**. Quando il Politecnico (PoliMi, SPID, WebEx) chiede di
+accedere, si apre la finestra **«Accedi al Politecnico»** di PoliRec. Fai il login lì: la finestra si chiude da sola e
+la sincronizzazione riprende. Se usi solo la riga di comando o un assistente AI, al suo posto si apre una piccola
+finestra di Chrome senza schede, solo per l'accesso. Per vedere Chrome mentre lavora (utile se qualcosa non va):
+*Impostazioni → Sincronizzazione → Mostra il browser*.
+
+## Corsi su un disco esterno
+
+Se la cartella di un corso è su un disco esterno scollegato, PoliRec non mostra errori e non scrive altrove. Compare
+**«Collega il disco»** con i corsi coinvolti, e la dashboard e la pagina del corso lo segnalano. Quando colleghi il
+disco, PoliRec se ne accorge in pochi secondi e risincronizza quei corsi da solo.
+
 ## Impostazioni (principali)
 | Sezione | Cosa si regola |
 |---|---|
