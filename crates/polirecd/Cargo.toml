@@ -1,0 +1,17 @@
+[package]
+name = "polirecd"
+description = "PoliRec daemon: always-on local server used by the app, the CLI and the MCP server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+polirec-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+regex = "1"

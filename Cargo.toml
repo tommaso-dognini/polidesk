@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = ["crates/polirec-core", "crates/polirecd", "crates/polirec"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+authors = ["Tommaso Dognini"]
+
+[workspace.dependencies]
+polirec-core = { path = "crates/polirec-core" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "process", "sync", "time", "fs", "signal"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
