@@ -13,8 +13,11 @@ const { CONFIG_FILE } = require('./paths');
 
 const DEFAULT_SETTINGS = {
     parallelDownloads: 3,
-    transcription: { auto: true, model: 'small', language: 'auto', format: 'txt', python: 'python3' },
-    ai: { provider: 'agy', model: '', autoNotes: false },
+    transcription: { auto: true, engine: 'auto', device: 'auto', model: 'small', language: 'auto', format: 'txt', python: 'python3' },
+    ai: { provider: 'agy', model: '', autoNotes: false, autoSummary: true },
+    autoSync: { onStart: true, intervalHours: 0 },
+    ui: { theme: 'normal', font: 'system', appearance: 'auto' },
+    setupDone: false,
     defaultRoot: '',
     polimiEmail: '',
 };
@@ -137,7 +140,14 @@ function fileStatus(courseDir, rec) {
 }
 
 function withFileStatus(courseDir, manifest) {
-    const recs = Object.values(manifest.recordings || {}).map(r => ({ ...r, ...fileStatus(courseDir, r), displayTitle: prettyTopic(r) }));
+    const d = courseDirs(courseDir);
+    const recs = Object.values(manifest.recordings || {}).map(r => {
+        const st = fileStatus(courseDir, r);
+        let summary = null;
+        const sf = st.notes.find(n => / - sommario\.md$/.test(n));
+        if (sf) { try { summary = fs.readFileSync(path.join(d.notes, sf), 'utf8').split('\n').map(l => l.trim()).find(l => l && !/^[#\-*•]/.test(l)) || null; } catch (e) { } }
+        return { ...r, ...st, displayTitle: prettyTopic(r), summary };
+    });
     return recs.sort((a, b) => (a.isoDate || '').localeCompare(b.isoDate || ''));
 }
 

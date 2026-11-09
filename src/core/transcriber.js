@@ -33,10 +33,10 @@ class Transcriber {
         const { opts } = job;
         this.current = job.video;
         const formats = (opts.format || 'txt').split(',').concat(['srt']).filter((v, i, a) => a.indexOf(v) === i).join(',');
-        const args = [SCRIPT, '--model', opts.model || 'small', '--language', opts.language || 'it', '--formats', formats, '--out-dir', job.outDir, job.video];
+        const args = [SCRIPT, '--engine', opts.engine || 'auto', '--device', opts.device || 'auto', '--model', opts.model || 'small', '--language', opts.language || 'auto', '--formats', formats, '--out-dir', job.outDir, job.video];
         const py = opts.python || 'python3';
         const env = { ...require('./downloader').toolEnv(), PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' };
-        const p = spawn(py, args, { env });
+        const p = spawn(py, args, { env, windowsHide: true });
         this.running = p;
         let result = null, errText = '';
         readline.createInterface({ input: p.stdout }).on('line', line => {
@@ -72,7 +72,7 @@ class Transcriber {
 
 function checkWhisper(python = 'python3') {
     return new Promise(resolve => {
-        const p = spawn(python, ['-c', 'import importlib.util as u;print("mlx" if u.find_spec("mlx_whisper") else ("whisper" if u.find_spec("whisper") else "none"))']);
+        const p = spawn(python, ['-c', 'import importlib.util as u;print("mlx" if u.find_spec("mlx_whisper") else "faster" if u.find_spec("faster_whisper") else "whisper" if u.find_spec("whisper") else "none")']);
         let out = '';
         p.stdout.on('data', d => out += d);
         p.on('error', () => resolve('none'));

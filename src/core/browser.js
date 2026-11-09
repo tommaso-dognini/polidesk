@@ -17,7 +17,11 @@ const CHROME_CANDIDATES = [
     '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+    '/snap/bin/chromium', '/usr/bin/microsoft-edge', '/usr/bin/brave-browser',
 ].filter(Boolean);
 
 function findChrome() {
@@ -50,10 +54,7 @@ class Session {
     async start() {
         if (this.browser) return this.page;
         fs.mkdirSync(PROFILE_DIR, { recursive: true });
-        // Remove stale lock left by a crashed Chrome
-        for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
-            try { fs.unlinkSync(path.join(PROFILE_DIR, f)); } catch (e) { }
-        }
+        await this.waitProfileFree();
         this.browser = await puppeteer.launch({
             executablePath: findChrome(),
             headless: this.headless,
@@ -64,6 +65,29 @@ class Session {
         this.page = (await this.browser.pages())[0] || await this.browser.newPage();
         await this.restoreCookies();
         return this.page;
+    }
+
+    /**
+     * Only one Chrome can use the profile. If another PoliRec (app or CLI) is syncing, wait for it;
+     * if the lock belongs to a dead process (crash), remove it.
+     */
+    async waitProfileFree(maxMs = 15 * 60000) {
+        const lock = path.join(PROFILE_DIR, 'SingletonLock');
+        const t0 = Date.now(); let told = false;
+        while (true) {
+            let target = null;
+            try { target = fs.readlinkSync(lock); } catch (e) { if (!fs.existsSync(lock)) return; }
+            const pid = target ? Number(String(target).split('-').pop()) : NaN;
+            let alive = false;
+            if (pid) { try { process.kill(pid, 0); alive = true; } catch (e) { alive = e.code === 'EPERM'; } }
+            if (!alive) {
+                for (const f of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) { try { fs.unlinkSync(path.join(PROFILE_DIR, f)); } catch (e) { } }
+                return;
+            }
+            if (!told) { this.log('⏳ Un\'altra sincronizzazione PoliRec sta usando il browser: attendo che finisca…'); told = true; }
+            if (Date.now() - t0 > maxMs) throw new Error('Browser occupato da un\'altra sincronizzazione PoliRec');
+            await sleep(3000);
+        }
     }
 
     async cdp() {
@@ -210,4 +234,4 @@ class Session {
     }
 }
 
-module.exports = { Session, sleep };
+module.exports = { Session, sleep, findChrome };
