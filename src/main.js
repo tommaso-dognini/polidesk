@@ -112,14 +112,15 @@ function aiBackfill(courseIds) {
             const w = ws.load(cloud.courseDataDir(c0.settings, c));
             const auto = !w.page.trim() || w.page.startsWith('<!-- polirec:auto');
             const summaries = recs.filter(r => r.notes.some(f => f.endsWith(' - sommario.md'))).length;
-            if (auto && (!w.pageAuto || w.pageAuto.summaries !== summaries) && summaries)
+            if (auto && (!w.pageAuto || w.pageAuto.summaries !== summaries || w.pageAuto.v !== PAGE_VERSION) && summaries)
                 { enqueueAi({ id: `${c.id}:page`, label: `Descrizione corso · ${c.name || c.input}`, run: () => generateCoursePage(c) }); n++; }
         }
     }
     return n;
 }
 
-/** Course page (Markdown) generated from lesson summaries, materials and timetable. */
+/** Course page: SHORT card generated from summaries, teachers, exam passages (semantic search) and timetable. */
+const PAGE_VERSION = 2;
 async function generateCoursePage(c, force) {
     const c0 = cfg();
     const dataDir = cloud.courseDataDir(c0.settings, c);
@@ -128,26 +129,34 @@ async function generateCoursePage(c, force) {
     const m = lib.loadManifest(c.dir);
     const recs = lib.withFileStatus(c.dir, m).sort((a, b) => (a.isoDate || '').localeCompare(b.isoDate || ''));
     const d = lib.courseDirs(c.dir);
-    const lessons = recs.map(r => {
-        const f = r.notes.find(n => n.endsWith(' - sommario.md'));
-        const sum = f ? fs.readFileSync(path.join(d.notes, f), 'utf8').trim() : '';
-        return `### ${(r.isoDate || '').slice(0, 10)} — ${r.displayTitle}${r.teacher ? ' (' + r.teacher + ')' : ''} [${r.type || ''}]\n${sum}`;
-    }).join('\n\n');
-    const mats = Object.values(m.materials || {}).map(v => v.path).slice(0, 80).join('\n');
+    const fullname = (m.course && m.course.fullname) || c.name || c.input;
+    // teachers: from the course name "(BORACCHI-MATTEUCCI)", recordings and the timetable
+    const teachers = new Set(recs.map(r => r.teacher).filter(Boolean));
     let slots = '';
     try {
         const tt = require('./core/timetable');
         const ev = tt.occurrences(new Date(), new Date(Date.now() + 7 * 864e5)).filter(e => tt.matchCourse(e.summary, { ...c, manifest: m }));
-        slots = ev.map(e => `${new Date(e.start).toLocaleDateString('it-IT', { weekday: 'long' })} ${new Date(e.start).toTimeString().slice(0, 5)}–${new Date(e.end).toTimeString().slice(0, 5)} ${e.location}`).join('\n');
+        slots = ev.map(e => `${new Date(e.start).toLocaleDateString('it-IT', { weekday: 'long' })} ${new Date(e.start).toTimeString().slice(0, 5)}–${new Date(e.end).toTimeString().slice(0, 5)}, aula ${(e.location || '').split('(')[0].trim()}`).join('\n');
+        for (const e of ev) { const t = (e.description || '').match(/Docente:\s*\n?(.+)/); if (t) teachers.add(t[1].trim()); }
     } catch (e) { }
-    const prompt = `Scrivi la pagina di presentazione (in italiano, Markdown) del corso universitario "${(m.course && m.course.fullname) || c.name}", per uno studente che lo frequenta. ` +
-        `Usa SOLO le informazioni fornite. Struttura:\n## Di cosa parla (3-5 frasi)\n## Programma svolto finora (elenco degli argomenti raggruppati per tema, con le date)\n## Concetti chiave (8-15 punti, formule in $…$ se utili)\n` +
-        `## Esame e info pratiche (solo se emergono dalle lezioni; altrimenti ometti)\n## Orario (se fornito)\n## Materiale principale (se fornito, max 10 voci)\nNiente introduzioni né chiusure.`;
-    const input = `<lezioni>\n${lessons}\n</lezioni>\n<materiale>\n${mats}\n</materiale>\n<orario>\n${slots}\n</orario>`;
+    const summaries = recs.map(r => { const f = r.notes.find(n => n.endsWith(' - sommario.md')); return f ? `- ${r.displayTitle}: ` + fs.readFileSync(path.join(d.notes, f), 'utf8').split('\n').find(l => l.trim() && !/^[-*#]/.test(l)) : ''; }).filter(Boolean).join('\n');
+    // exam info: the most relevant passages from lessons/slides (semantic search, if installed)
+    let exam = '';
+    try {
+        if (await searchReady()) {
+            const { results } = await search.query(c0, 'modalità d\'esame, regole dell\'esame, scritto, orale, progetto, homework, voto finale, appelli', { courseId: c.id, k: 8 });
+            exam = results.filter(r => r.score > 0.35).map(r => `- (${r.meta.type === 'lesson' ? r.meta.title : r.meta.title || r.meta.file}) ${r.text.slice(0, 600)}`).join('\n');
+        }
+    } catch (e) { }
+    const prompt = `Scrivi la scheda del corso universitario "${fullname}" in italiano, Markdown, BREVE (massimo ~150 parole). Usa SOLO le informazioni fornite, niente inventato. Formato esatto:\n` +
+        `**In breve** — 2-3 frasi su di cosa tratta il corso.\n\n**Docenti** — nomi (e ruolo se emerge: lezioni, esercitazioni, laboratori).\n\n` +
+        `**Esame** — modalità d'esame in 1-3 punti (scritto/orale/progetto/homework, pesi, regole). Se non emerge dalle fonti scrivi «Non ancora indicata nelle lezioni».\n\n` +
+        `**Orario** — una riga per lezione settimanale, solo se fornito.\nNient'altro: niente titoli #, niente programma dettagliato, niente premesse.`;
+    const input = `<corso>${fullname}</corso>\n<docenti>${[...teachers].join(', ')}</docenti>\n<sommari>\n${summaries}\n</sommari>\n<esame>\n${exam}\n</esame>\n<orario>\n${slots}\n</orario>`;
     const prov = extra.pickProvider(c0.settings);
     const md = await ai.runPrompt(prov, prompt, input, { model: c0.settings.ai.model, cwd: require('os').tmpdir() });
-    const summaries = recs.filter(r => r.notes.some(f => f.endsWith(' - sommario.md'))).length;
-    ws.update(dataDir, x => { x.page = `<!-- polirec:auto ${new Date().toISOString().slice(0, 10)} — generata dall'AI, modificala liberamente: non verrà più sovrascritta -->\n` + md.trim() + '\n'; x.pageAuto = { at: new Date().toISOString(), summaries }; });
+    const nSum = recs.filter(r => r.notes.some(f => f.endsWith(' - sommario.md'))).length;
+    ws.update(dataDir, x => { x.page = `<!-- polirec:auto ${new Date().toISOString().slice(0, 10)} — generata dall'AI, modificala liberamente: non verrà più sovrascritta -->\n` + md.trim() + '\n'; x.pageAuto = { at: new Date().toISOString(), summaries: nSum, v: PAGE_VERSION }; });
     send({ type: 'refresh' });
     scheduleIndex(c.id);
 }

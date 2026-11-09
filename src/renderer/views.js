@@ -49,8 +49,8 @@ const Pomo = {
     cfg() { return (S && S.settings.pomodoro) || { focus: 25, short: 5, long: 15, every: 4, sound: true }; },
     dur(mode) { const c = this.cfg(); return (mode === 'focus' ? c.focus : mode === 'short' ? c.short : c.long) * 60000; },
     save() { localStorage.setItem('pomo', JSON.stringify(this.st)); },
-    remaining() { return this.st.running ? Math.max(0, this.st.endsAt - Date.now()) : (this.st.left || this.dur(this.st.mode)); },
-    start() { this.st.running = true; this.st.endsAt = Date.now() + this.remaining(); this.st.startedAt = this.st.startedAt || new Date().toISOString(); this.save(); this.draw(); },
+    remaining() { return this.st.running ? Math.max(0, (this.st.endsAt || 0) - Date.now()) : (this.st.left > 0 ? this.st.left : this.dur(this.st.mode)); },
+    start() { if (this.st.running) return; const left = this.remaining(); this.st.endsAt = Date.now() + (left > 0 ? left : this.dur(this.st.mode)); this.st.running = true; this.st.startedAt = this.st.startedAt || new Date().toISOString(); this.save(); this.draw(); },
     pause() { this.st.left = this.remaining(); this.st.running = false; this.save(); this.draw(); },
     reset(mode) { this.st = { ...this.st, mode: mode || this.st.mode, running: false, left: this.dur(mode || this.st.mode), startedAt: null }; this.save(); this.draw(); },
     async finish() {
@@ -89,6 +89,7 @@ const Pomo = {
         $('#pomo-course').onchange = e => { this.st.courseId = e.target.value || null; this.save(); };
     },
 };
+if (Pomo.st.running && (!Pomo.st.endsAt || Pomo.st.endsAt < Date.now() - 60000)) { Pomo.st.running = false; Pomo.st.left = Pomo.dur(Pomo.st.mode); Pomo.save(); }
 setInterval(() => { if (Pomo.st.running) { if (Pomo.remaining() <= 0) Pomo.finish(); else Pomo.draw(); } }, 1000);
 window.Pomo = Pomo;
 
@@ -109,13 +110,18 @@ window.extraViews.notes = async v => {
     if (route.scope !== undefined) Notes.scope = route.scope;
     v.innerHTML = `<div class="notes-layout">
         <aside class="notes-side">
-            <div class="ns-head"><b>Appunti</b><span class="grow"></span><button class="primary small" id="n-new" title="Nuovo appunto (⌘N)">＋ Nuovo</button></div>
+            <div class="ns-head"><b>Appunti</b><span class="grow"></span><button class="primary small" id="n-new" title="Nuovo appunto (⌘N)">＋ Nuovo</button><button class="ghost small icon" id="n-hide" title="Nascondi elenco (⌘⇧E)">⇤</button></div>
             <div class="ns-search"><input id="n-filter" placeholder="Cerca negli appunti…"></div>
             <div id="n-tree" class="n-tree"></div>
             <div class="ns-foot"><button class="ghost small" id="n-folder">⌂ Apri cartella</button><span class="faint" id="n-cloud"></span></div>
         </aside>
         <section class="notes-main" id="n-main"></section>
     </div>`;
+    const layout = $('.notes-layout', v);
+    const setFiles = hidden => { layout.classList.toggle('files-hidden', hidden); try { localStorage.setItem('notesFilesHidden', hidden ? '1' : '0'); } catch (e) { } };
+    Notes.toggleFiles = () => setFiles(!layout.classList.contains('files-hidden'));
+    try { setFiles(localStorage.getItem('notesFilesHidden') === '1'); } catch (e) { }
+    $('#n-hide', v).onclick = () => setFiles(true);
     const scopes = await api.notes.scopes();
     const cloudOn = S.settings.cloud && S.settings.cloud.enabled;
     $('#n-cloud').textContent = cloudOn ? '☁ sincronizzati' : '';
@@ -195,6 +201,7 @@ async function openNote(file, kind, scope = Notes.scope) {
     const scopeName = scope && course(scope) ? cname(course(scope)) : 'Generale';
     const m = $('#n-main');
     m.innerHTML = `<header class="ed-head">
+            <button class="ghost icon ed-files" id="ed-files" title="Mostra/nascondi elenco appunti (⌘⇧E)">☰</button>
             <div class="ed-titlebox"><input class="ed-title" id="ed-title" value="${esc(file.replace(/\.(md|tex|typ)$/, '').split('/').pop())}" spellcheck="false">
                 <div class="ed-meta"><span class="badge-k ${kind}">${KIND_LABEL[kind]}</span><span>${esc(scopeName)}</span><span id="ed-saved">Salvato</span></div></div>
             <div class="ed-actions">
@@ -248,6 +255,7 @@ async function openNote(file, kind, scope = Notes.scope) {
     });
     $('#ed-ai').onclick = () => { Notes.aiOpen = !Notes.aiOpen; $('.ed-body').classList.toggle('with-ai', Notes.aiOpen); $('#ed-ai').classList.toggle('on', Notes.aiOpen); if (Notes.aiOpen) $('#ai-q') && $('#ai-q').focus(); };
     $('#ed-export').onclick = e => exportMenu(e);
+    $('#ed-files').onclick = () => Notes.toggleFiles && Notes.toggleFiles();
     $('#ed-more').onclick = e => showMenu(e.clientX - 200, e.clientY + 10, [
         ['📁 Mostra nella cartella', () => api.reveal(Notes.dir + '/' + file)],
         ['↗ Apri con app di sistema', () => api.openPath(Notes.dir + '/' + file)],
@@ -310,7 +318,10 @@ async function compileNote() {
     } finally { b.disabled = false; b.textContent = '▶ Compila'; }
 }
 
-document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && route.name === 'notes' && Notes.create) { e.preventDefault(); Notes.create(Notes.scope); } });
+document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && route.name === 'notes' && Notes.create) { e.preventDefault(); Notes.create(Notes.scope); }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'e' && route.name === 'notes' && Notes.toggleFiles) { e.preventDefault(); Notes.toggleFiles(); }
+});
 
 // ── AI chat panel: answers in the chat, edits applied inline as reviewable changes ──
 const AI_ACTIONS = [

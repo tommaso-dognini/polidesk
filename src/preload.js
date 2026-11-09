@@ -57,7 +57,7 @@ contextBridge.exposeInMainWorld('polirec', {
         events: (from, to) => invoke('cal:events', { from, to }),
         revealIcs: () => invoke('cal:revealIcs'),
     },
-    rooms: { spaces: () => invoke('rooms:spaces'), free: q => invoke('rooms:free', q) },
+    rooms: { spaces: () => invoke('rooms:spaces'), free: q => invoke('rooms:free', q), status: q => invoke('rooms:status', q), photo: id => invoke('rooms:photo', id) },
     notes: {
         scopes: () => invoke('notes:scopes'),
         list: scope => invoke('notes:list', scope),

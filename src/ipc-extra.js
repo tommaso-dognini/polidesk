@@ -105,7 +105,9 @@ function register({ handle, send, cfg, findCourse, getSession, closeSession, isS
     handle('cal:revealIcs', async () => { if (fs.existsSync(timetable.ICS)) shell.showItemInFolder(timetable.ICS); else throw new Error('Importa prima l\'orario'); return true; });
 
     // ── free rooms ──
-    handle('rooms:spaces', async () => { const sp = await rooms.spaces(); return { sedi: sp.sedi, campus: sp.campus }; });
+    handle('rooms:spaces', async () => { const sp = await rooms.spaces(); return { sedi: sp.sedi.filter(s => s.id !== 'MIC'), campus: sp.campus.filter(c => c.sede !== 'MIC').map(({ shape, ...c }) => c) }; });
+    handle('rooms:status', async q => rooms.status({ ...q, onProgress: p => send({ type: 'rooms-progress', p }) }));
+    handle('rooms:photo', async id => { const f = await rooms.photo(id); return f ? pathToFileURL(f).href : null; });
     handle('rooms:free', async q => rooms.freeRooms({ ...q, when: new Date(q.when), onProgress: p => send({ type: 'rooms-progress', p }) }));
 
     // ── notes (appunti) ──

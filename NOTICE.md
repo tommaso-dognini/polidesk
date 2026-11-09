@@ -22,7 +22,7 @@ studentesca del Politecnico di Milano, in particolare dei progetti raccolti da
 |---|---|---|---|
 | [WeBeepSync](https://github.com/toto04/webeep-sync) | Tommaso Morganti | GPL-3.0 | Sincronizzazione incrementale dei file WeBeep. |
 | [PoliMi Webex Enhancer](https://github.com/fravagli/Polimi-webex-enhancer) | Francesco Vagli | GPL-3.0 | Player offline, salto dei silenzi, testo sincronizzato col video. |
-| [@alpolimibot](https://github.com/riccardosalemme/alpolimibot) / [PoliAule](https://poliaule.com) | riccardosalemme / PoliNetwork | GPL-3.0 / — | Aule libere dalle API pubbliche del Politecnico (`maps_rest`), con un client scritto da zero. |
+| [@alpolimibot](https://github.com/riccardosalemme/alpolimibot) / [PoliAule](https://poliaule.com) | riccardosalemme / PoliNetwork | GPL-3.0 / — | Aule libere dalle API pubbliche del Politecnico (`maps_rest`), con un client scritto da zero; impaginazione (sede, giorno, fascia oraria, preferite, aule per edificio) ispirata a PoliAule. |
 | [Handy](https://github.com/cjpais/Handy) | CJ Pais | MIT | Dettatura push-to-talk con trascrizione locale e uso del modello Parakeet. |
 
 I progetti senza licenza (PoliAuth, PoliPlease, PoliDL-GUI, polimi-schedule, TdeMerger…) sono solo
@@ -37,6 +37,7 @@ linkati nella pagina *Community*: senza licenza il loro codice non può essere r
 | [CodeMirror 6](https://codemirror.net/) | MIT |
 | [@codemirror/merge](https://github.com/codemirror/merge) | MIT (revisione inline delle modifiche proposte dall'AI) |
 | [markdown-it](https://github.com/markdown-it/markdown-it) | MIT |
+| [Leaflet](https://leafletjs.com/) | BSD-2-Clause (`src/renderer/vendor/leaflet/LICENSE`) — mappa delle aule; forme degli edifici e foto delle aule dalle API pubbliche del Politecnico, nessuna tile di terze parti |
 | [KaTeX](https://katex.org/) (codice e font) | MIT |
 | [luxon](https://moment.github.io/luxon/), [uuid](https://github.com/uuidjs/uuid) | MIT |
 | [immutable-ics](https://github.com/angeloashmore/immutable-ics) | ISC |
