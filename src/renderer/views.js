@@ -3,6 +3,44 @@
    Uses globals from app.js: api, $, $$, esc, S, route, go, guard, toast, log, md, course, cname, field, sw, fmtDate, refresh */
 
 window.extraViews = {};
+
+// window.prompt() is not supported in Electron: in-app text dialog instead.
+function askText(title, { value = '', placeholder = '', multiline = false, ok = 'OK', help = '' } = {}) {
+    return new Promise(resolve => {
+        const root = $('#modal-root');
+        root.innerHTML = `<div class="modal-bg"><div class="modal"><h2>${esc(title)}</h2>${help ? `<p class="muted" style="margin:0">${esc(help)}</p>` : ''}
+            ${multiline ? `<textarea id="ask-v" rows="10" placeholder="${esc(placeholder)}">${esc(value)}</textarea>` : `<input id="ask-v" value="${esc(value)}" placeholder="${esc(placeholder)}">`}
+            <div class="foot"><button class="ghost" id="ask-no">Annulla</button><button class="primary" id="ask-ok">${esc(ok)}</button></div></div></div>`;
+        const inp = $('#ask-v'), done = v => { root.innerHTML = ''; document.removeEventListener('keydown', key); resolve(v); };
+        const key = e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter' && (!multiline || e.metaKey || e.ctrlKey)) { e.preventDefault(); done(inp.value); } };
+        document.addEventListener('keydown', key);
+        $('#ask-no').onclick = () => done(null);
+        $('#ask-ok').onclick = () => done(inp.value);
+        $('.modal-bg', root).onclick = e => { if (e.target.classList.contains('modal-bg')) done(null); };
+        inp.focus(); if (inp.select) inp.select();
+    });
+}
+window.askText = askText;
+
+// New note dialog: title + format
+function askNewNote(defaultKind) {
+    return new Promise(resolve => {
+        const root = $('#modal-root');
+        let kind = defaultKind || 'markdown';
+        root.innerHTML = `<div class="modal-bg"><div class="modal"><h2>Nuovo appunto</h2>
+            <label class="l">Titolo<input id="nn-t" placeholder="es. Lezione 3 — Backpropagation"></label>
+            <label class="l">Formato<div class="seg" id="nn-k">${[['markdown', 'Markdown'], ['latex', 'LaTeX'], ['typst', 'Typst']].map(([k, l]) => `<button data-v="${k}" class="${k === kind ? 'on' : ''}">${l}</button>`).join('')}</div></label>
+            <div class="foot"><button class="ghost" id="nn-no">Annulla</button><button class="primary" id="nn-ok">Crea</button></div></div></div>`;
+        const done = v => { root.innerHTML = ''; document.removeEventListener('keydown', key); resolve(v); };
+        const ok = () => done({ title: $('#nn-t').value.trim() || 'Senza titolo', kind });
+        const key = e => { if (e.key === 'Escape') done(null); if (e.key === 'Enter') { e.preventDefault(); ok(); } };
+        document.addEventListener('keydown', key);
+        $$('#nn-k button').forEach(b => b.onclick = () => { kind = b.dataset.v; $$('#nn-k button').forEach(x => x.classList.toggle('on', x === b)); });
+        $('#nn-no').onclick = () => done(null);
+        $('#nn-ok').onclick = ok;
+        $('#nn-t').focus();
+    });
+}
 window.noRerender = new Set(['notes']);
 
 // ═════════════ POMODORO (sidebar widget, state survives reloads) ═════════════
@@ -85,10 +123,10 @@ window.extraViews.notes = async v => {
     $('#n-filter').oninput = loadFiles;
     $('#n-folder').onclick = () => guard(() => api.openPath(Notes.dir));
     const create = kind => guard(async () => {
-        const title = prompt('Titolo dell\'appunto', '');
-        if (title === null) return;
-        const f = await api.notes.create(Notes.scope, title || 'Senza titolo', kind);
-        await loadFiles(); openNote(f, kind);
+        const r = await askNewNote(kind);
+        if (!r) return;
+        const f = await api.notes.create(Notes.scope, r.title, r.kind);
+        await loadFiles(); openNote(f, r.kind);
     });
     $('#n-new').onclick = () => create(mode);
     $('#n-newmenu').onclick = e => showMenu(e.clientX, e.clientY + 10, Object.entries(KIND_LABEL).map(([k, l]) => [`Nuovo ${l}`, () => create(k)]));
@@ -151,7 +189,7 @@ async function openNote(file, kind) {
     $$('[data-w]', m).forEach(b => b.onclick = () => { const [a, z] = b.dataset.w.split(','); Notes.editor.wrapSelection(a, z); });
     $('#ed-prev').onclick = () => { Notes.preview = !Notes.preview; openNote(file, kind); };
     $('#ed-ai').onclick = () => { Notes.aiOpen = !Notes.aiOpen; $('.ed-body').classList.toggle('with-ai', Notes.aiOpen); $('#ed-ai').classList.toggle('on', Notes.aiOpen); };
-    $('#ed-title').onclick = () => { const n = prompt('Nuovo nome', file.replace(/\.(md|tex|typ)$/, '').split('/').pop()); if (n) guard(async () => { await flush(); const nf = await api.notes.rename(Notes.scope, file, n); await Notes.reload(); openNote(nf, kind); }); };
+    $('#ed-title').onclick = async () => { const n = await askText('Rinomina appunto', { value: file.replace(/\.(md|tex|typ)$/, '').split('/').pop(), ok: 'Rinomina' }); if (n && n.trim()) guard(async () => { await flush(); const nf = await api.notes.rename(Notes.scope, file, n); await Notes.reload(); openNote(nf, kind); }); };
     $('#ed-more').onclick = e => showMenu(e.clientX - 180, e.clientY + 10, [
         ['📁 Mostra nella cartella', () => api.reveal(Notes.dir + '/' + file)],
         ['↗ Apri con app di sistema', () => api.openPath(Notes.dir + '/' + file)],
@@ -296,8 +334,8 @@ window.extraViews.calendar = async v => {
     $('#cal-sync').onclick = () => guard(async () => { $('#cal-sync').disabled = true; $('#cal-sync').innerHTML = '<span class="spin"></span> Apro i Servizi Online…'; const r = await api.cal.sync(); toast(`${r.count} serie di lezioni importate`); window.extraViews.calendar(v); });
     $('#cal-more').onclick = e => showMenu(e.clientX - 200, e.clientY + 10, [
         ['📄 Importa file .ics…', async () => { const n = await api.cal.importIcs(); if (n) { toast(`${n} eventi importati`); window.extraViews.calendar(v); } }],
-        ['🌐 Aggiungi calendario web (URL .ics)…', async () => { const u = prompt('URL del calendario (.ics, webcal://, Google Calendar "indirizzo segreto in formato iCal")'); if (u) { const n = await api.cal.importIcs(u.trim()); toast(`${n} eventi importati`); window.extraViews.calendar(v); } }],
-        ['📋 Incolla orario testuale…', async () => { const t = prompt('Incolla qui il testo dell\'orario (Servizi Online o Manifesto degli studi)'); if (t) { const r = await api.cal.importText(t); toast(`${r.count} serie importate`); window.extraViews.calendar(v); } }],
+        ['🌐 Aggiungi calendario web (URL .ics)…', async () => { const u = await askText('Aggiungi calendario web', { placeholder: 'https://… .ics oppure webcal://…', help: 'Per Google Calendar usa l\'«indirizzo segreto in formato iCal» dalle impostazioni del calendario.', ok: 'Importa' }); if (u) { const n = await api.cal.importIcs(u.trim()); toast(`${n} eventi importati`); window.extraViews.calendar(v); } }],
+        ['📋 Incolla orario testuale…', async () => { const t = await askText('Incolla orario testuale', { multiline: true, placeholder: '054307 - NOME CORSO (Docente: …)\nInizio lezioni: …\nLunedì dalle 10:15 alle 12:15 in aula …', help: 'Copia l\'«Orario testuale» dai Servizi Online o dal Manifesto degli studi. ⌘↵ per importare.', ok: 'Importa' }); if (t) { const r = await api.cal.importText(t); toast(`${r.count} serie importate`); window.extraViews.calendar(v); } }],
         '-',
         ['📤 Esporta per Google Calendar / Apple Calendar (.ics)', () => api.cal.revealIcs()],
     ]);
@@ -372,7 +410,7 @@ function wireTodos(root, redraw, fixedCourse) {
         const cid = fixedCourse !== undefined ? fixedCourse : (el.dataset.c || null);
         $('input', el).onchange = e => guard(async () => { await api.ws.setTodo(cid, el.dataset.id, { done: e.target.checked }); redraw(); });
         $('.del', el).onclick = () => guard(async () => { await api.ws.removeTodo(cid, el.dataset.id); redraw(); });
-        $('.tt', el).ondblclick = () => { const n = prompt('Modifica', $('.tt', el).textContent); if (n) guard(async () => { await api.ws.setTodo(cid, el.dataset.id, { text: n }); redraw(); }); };
+        $('.tt', el).ondblclick = async () => { const n = await askText('Modifica attività', { value: $('.tt', el).textContent, ok: 'Salva' }); if (n && n.trim()) guard(async () => { await api.ws.setTodo(cid, el.dataset.id, { text: n }); redraw(); }); };
     });
 }
 
