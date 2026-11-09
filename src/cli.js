@@ -64,7 +64,7 @@ function pick(cfg, sel) {
                         }
                     },
                 });
-                lib.saveConfig(cfg);
+                lib.patchCourse(c.id, { webeepId: c.webeepId, name: c.name });
                 console.log('Risultato:', JSON.stringify(r));
             }
         } finally { await s.close(); }

@@ -246,6 +246,14 @@ function createWindow() {
         webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
     });
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    win.webContents.on('console-message', e => { if (e.level === 'warning' || e.level === 'error') console.error('[renderer]', e.message); });
+    // POLIREC_SMOKE=out.png: render, save a screenshot and quit (used for automated checks)
+    if (process.env.POLIREC_SMOKE) {
+        win.webContents.once('did-finish-load', () => setTimeout(async () => {
+            fs.writeFileSync(process.env.POLIREC_SMOKE, (await win.webContents.capturePage()).toPNG());
+            app.quit();
+        }, 2500));
+    }
 }
 
 app.whenReady().then(createWindow);

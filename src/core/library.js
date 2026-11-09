@@ -37,6 +37,14 @@ function legacyEmail() {
     return '';
 }
 
+/** Re-read config from disk and patch one course: never clobbers changes made by another process. */
+function patchCourse(id, patch) {
+    const cfg = loadConfig();
+    const c = cfg.courses.find(x => x.id === id);
+    if (c) { Object.assign(c, patch); saveConfig(cfg); }
+    return cfg;
+}
+
 function saveConfig(cfg) {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
 }
@@ -149,4 +157,4 @@ function writeIndex(courseDir, manifest) {
     fs.writeFileSync(d.index, md);
 }
 
-module.exports = { DEFAULT_SETTINGS, DIRS, loadConfig, saveConfig, courseDirs, loadManifest, saveManifest, assignFilename, baseName, prettyTopic, teacherFrom, sanitize, writeIndex, fileStatus, withFileStatus };
+module.exports = { DEFAULT_SETTINGS, DIRS, loadConfig, saveConfig, patchCourse, courseDirs, loadManifest, saveManifest, assignFilename, baseName, prettyTopic, teacherFrom, sanitize, writeIndex, fileStatus, withFileStatus };
