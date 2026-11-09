@@ -1,7 +1,7 @@
 {
   "name": "polirec",
   "version": "0.1.0",
-  "description": "Download, transcribe and study PoliMi lecture recordings (WeBeep / RecMan / WebEx)",
+  "description": "Registrazioni, appunti, calendario e strumenti di studio per gli studenti del Politecnico di Milano (app non ufficiale)",
   "main": "src/main.js",
   "license": "MIT",
   "scripts": {
@@ -10,16 +10,37 @@
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
-    "dist:linux": "electron-builder --linux"
+    "dist:linux": "electron-builder --linux",
+    "build:editor": "esbuild src/renderer-src/editor.js --bundle --minify --format=iife --outfile=src/renderer/vendor/editor.js",
+    "prestart": "npm run build:editor",
+    "predist": "npm run build:editor",
+    "build:vendor": "esbuild src/vendor/polimi-schedule-js/schedule-to-ical.mjs --bundle --platform=node --format=cjs --outfile=src/vendor/polimi-schedule-js/schedule.bundle.cjs"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
     "ffmpeg-static": "^5.3.0",
-    "puppeteer-core": "^25.16.0"
+    "immutable-ics": "^0.4.0",
+    "luxon": "^3.7.2",
+    "puppeteer-core": "^25.16.0",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@lezer/highlight": "^1.2.5",
+    "@mdit/plugin-katex-slim": "^0.26.2",
+    "codemirror": "^6.0.2",
     "electron": "^45.2.3",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.25.12",
+    "katex": "^0.16.47",
+    "markdown-it": "^14.3.3"
   },
   "author": "Tommaso Dognini",
   "build": {
@@ -36,7 +57,9 @@
       "package.json",
       "LICENSE",
       "NOTICE.md",
-      "!**/*.map"
+      "PRIVACY.md",
+      "!**/*.map",
+      "!src/renderer-src/**"
     ],
     "asarUnpack": [
       "python/**",
@@ -60,7 +83,11 @@
           ]
         }
       ],
-      "identity": null
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "PoliRec usa il microfono solo per la dettatura negli appunti (trascritta in locale)."
+      },
+      "icon": "build/icon.png"
     },
     "win": {
       "target": [
@@ -70,7 +97,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
@@ -81,7 +109,18 @@
       "target": [
         "AppImage",
         "deb"
-      ]
-    }
+      ],
+      "icon": "build/icon.png"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "polirec": {
+    "donateUrl": "",
+    "repo": ""
   }
 }

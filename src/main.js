@@ -13,6 +13,8 @@ const { Transcriber, checkWhisper } = require('./core/transcriber');
 const ai = require('./core/ai');
 const dl = require('./core/downloader');
 const setup = require('./core/setup');
+const cleaner = require('./core/cleaner');
+const extra = require('./ipc-extra');
 
 let win = null;
 let session = null;
@@ -60,6 +62,10 @@ function queueTranscription(course, rec) {
     transcriber.enqueue(video, dirs.transcripts, transcriptionOpts(course))
         .then(async res => {
             if (!res) return;
+            // remove fillers (ehm, mmm…) and Whisper hallucinations; originals kept in trascrizioni/.orig
+            if (cfg().settings.transcription.clean !== false) {
+                try { cleaner.cleanTranscriptFiles(dirs.transcripts, rec.file.replace(/\.mp4$/i, '')); } catch (e) { log('⚠ Pulizia trascrizione: ' + e.message, course.id); }
+            }
             const s = cfg().settings.ai;
             if (s.autoSummary) await generateNotes(course, rec.key, 'sommario').catch(e => log('✗ Sommario: ' + e.message, course.id));
             if (s.autoNotes) await generateNotes(course, rec.key, 'appunti').catch(e => log('✗ Note: ' + e.message, course.id));
@@ -279,6 +285,8 @@ handle('recording', async ({ courseId, key }) => {
     return { rec, segments, text, notes, videoPath, videoUrl: rec.videoExists ? 'media://local/' + encodeURIComponent(videoPath) : null };
 });
 
+extra.register({ handle, send, cfg, findCourse, getSession, closeSession, isSyncing: () => syncing });
+
 handle('settings:save', async s => { const c = cfg(); c.settings = { ...c.settings, ...s }; lib.saveConfig(c); scheduleAutoSync(); return c.settings; });
 
 handle('pick-dir', async def => {
@@ -329,8 +337,11 @@ function createWindow() {
         backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f5f5f7',
         titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
         trafficLightPosition: { x: 18, y: 20 },
-        webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+        webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, plugins: true },
     });
+    // microphone for dictation; everything else denied
+    win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media' || perm === 'notifications'));
+    win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
     win.webContents.on('console-message', e => { if (e.level === 'warning' || e.level === 'error') console.error('[renderer]', e.message); });
     win.webContents.once('did-finish-load', () => {

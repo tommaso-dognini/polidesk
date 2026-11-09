@@ -2,8 +2,9 @@
 <html lang="it">
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' media: file:; font-src 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: media:; media-src 'self' media: file: blob:; font-src 'self' data:; frame-src 'self' file:">
     <title>PoliRec</title>
+    <link rel="stylesheet" href="vendor/katex.min.css">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,11 +14,18 @@
             <div class="brand"><span class="logo">●</span><span>PoliRec</span></div>
             <nav class="nav">
                 <a data-route="dashboard" class="nav-item"><span class="ico">⌂</span>Dashboard</a>
-                <a data-route="community" class="nav-item"><span class="ico">✦</span>Community</a>
-                <a data-route="settings" class="nav-item"><span class="ico">⚙</span>Impostazioni</a>
+                <a data-route="notes" class="nav-item"><span class="ico">✎</span>Appunti</a>
+                <a data-route="calendar" class="nav-item"><span class="ico">▦</span>Calendario</a>
+                <a data-route="rooms" class="nav-item"><span class="ico">⌖</span>Aule libere</a>
+                <a data-route="todos" class="nav-item"><span class="ico">☑</span>Da fare</a>
             </nav>
             <div class="nav-label">Corsi</div>
             <nav id="side-courses" class="nav courses"></nav>
+            <div id="pomo" class="pomo"></div>
+            <nav class="nav">
+                <a data-route="community" class="nav-item"><span class="ico">✦</span>Community</a>
+                <a data-route="settings" class="nav-item"><span class="ico">⚙</span>Impostazioni</a>
+            </nav>
             <div id="side-status" class="side-status"></div>
         </aside>
         <main id="main">
@@ -35,6 +43,8 @@
     <div id="modal-root"></div>
     <div id="menu" class="menu hidden"></div>
     <div id="toast" class="toast hidden"></div>
+    <script src="vendor/editor.js"></script>
     <script src="app.js"></script>
+    <script src="views.js"></script>
 </body>
 </html>

@@ -54,6 +54,36 @@ def load_engine(engine, model, device="auto"):
     if engine == "auto":
         engine = "mlx" if iu.find_spec("mlx_whisper") else "faster" if iu.find_spec("faster_whisper") else "whisper"
 
+    if engine == "parakeet":
+        # NVIDIA Parakeet TDT v3 (CC-BY-4.0) via parakeet-mlx (Apache-2.0) — the engine used by Handy.
+        # Multilingual (25 EU languages, auto-detected); verbatim (fillers are removed by PoliRec's cleaner).
+        from parakeet_mlx import from_pretrained
+        repo = model if "/" in model else "mlx-community/parakeet-tdt-0.6b-v3"
+        m = from_pretrained(repo)
+        def run(path, language):
+            r = m.transcribe(path, chunk_duration=120, overlap_duration=15)
+            segs = []
+            for sent in r.sentences:
+                toks = getattr(sent, "tokens", None) or []
+                if not toks or sent.end - sent.start < 12:
+                    segs.append({"start": sent.start, "end": sent.end, "text": sent.text.strip()})
+                    continue
+                cur, start = "", None
+                prev_end = None
+                for tk in toks:
+                    # cut before a new word once the segment is ~6 s long (tokens carry their leading space)
+                    if start is not None and tk.start - start > 6 and tk.text.startswith(" "):
+                        segs.append({"start": start, "end": prev_end, "text": cur.strip()})
+                        cur, start = "", None
+                    if start is None:
+                        start = tk.start
+                    cur += tk.text
+                    prev_end = tk.end
+                if cur.strip():
+                    segs.append({"start": start, "end": toks[-1].end, "text": cur.strip()})
+            return {"text": " ".join(s["text"] for s in segs), "segments": segs, "language": language or "auto"}
+        return "parakeet-mlx", run
+
     if engine == "mlx":
         import mlx_whisper
         repo = model if "/" in model else MLX_REPOS.get(model, f"mlx-community/whisper-{model}-mlx")
@@ -106,7 +136,7 @@ def main():
     ap.add_argument("--language", default="it", help="'auto' for autodetect")
     ap.add_argument("--formats", default="txt,srt")
     ap.add_argument("--out-dir", default=None)
-    ap.add_argument("--engine", default="auto", choices=["auto", "mlx", "faster", "whisper"])
+    ap.add_argument("--engine", default="auto", choices=["auto", "mlx", "faster", "whisper", "parakeet"])
     a = ap.parse_args()
     language = None if a.language in ("auto", "", None) else a.language
     formats = [f.strip() for f in a.formats.split(",") if f.strip()]

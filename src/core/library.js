@@ -13,7 +13,11 @@ const { CONFIG_FILE } = require('./paths');
 
 const DEFAULT_SETTINGS = {
     parallelDownloads: 3,
-    transcription: { auto: true, engine: 'auto', device: 'auto', model: 'small', language: 'auto', format: 'txt', python: 'python3' },
+    transcription: { auto: true, clean: true, engine: 'auto', device: 'auto', model: 'small', language: 'auto', format: 'txt', python: 'python3' },
+    editor: { mode: 'markdown', aiPanel: true, font: 'mono' },
+    pomodoro: { focus: 25, short: 5, long: 15, every: 4, sound: true },
+    rooms: { sede: 'MIA', minutes: 60 },
+    notesRoot: '',
     ai: { provider: 'agy', model: '', autoNotes: false, autoSummary: true },
     autoSync: { onStart: true, intervalHours: 0 },
     ui: { theme: 'normal', font: 'system', appearance: 'auto' },

@@ -71,6 +71,7 @@ async function refresh() {
 }
 function go(r) {
     if (player && r.name !== 'recording') { player.pause(); player = null; }
+    if (route.name === 'notes' && window.flushNote) window.flushNote();
     route = r; $('#view').dataset.view = ''; render(); $('#view').scrollTop = 0;
 }
 
@@ -79,17 +80,28 @@ function render() {
     if (!S.settings.setupDone && route.name !== 'setup' && !render.skippedSetup) route = { name: 'setup' };
     renderSidebar();
     const v = $('#view');
-    const views = { dashboard: viewDashboard, course: viewCourse, recording: viewRecording, settings: viewSettings, setup: viewSetup, community: viewCommunity };
+    const views = { dashboard: viewDashboard, course: viewCourse, recording: viewRecording, settings: viewSettings, setup: viewSetup, community: viewCommunity, ...(window.extraViews || {}) };
     // the recording page owns a <video>: never re-render it on state refresh, only update panels
     if (route.name === 'recording' && v.dataset.view === 'recording:' + route.key) { updateRecordingLive(); return; }
     // don't wipe forms the user is typing in
-    if ((route.name === 'settings' || route.name === 'setup' || (route.name === 'course' && route.tab === 'impostazioni')) && v.dataset.view === viewKey()) return;
+    if ((route.name === 'settings' || route.name === 'setup' || ['impostazioni', 'panoramica'].includes(route.tab) || (window.noRerender && window.noRerender.has(route.name)) || ['calendar', 'rooms', 'todos'].includes(route.name)) && v.dataset.view === viewKey()) return;
     v.dataset.view = viewKey();
     (views[route.name] || viewDashboard)(v);
 }
-const viewKey = () => route.name === 'recording' ? 'recording:' + route.key : route.name + ':' + (route.courseId || '') + ':' + (route.tab || '');
+const viewKey = () => route.name === 'recording' ? 'recording:' + route.key : route.name + ':' + (route.courseId || '') + ':' + (route.tab || '') + ':' + (route.scope || '');
+
+function showMenu(x, y, items) {
+    const m = $('#menu');
+    m.innerHTML = items.map((it, i) => it === '-' ? '<hr>' : `<div data-i="${i}">${esc(it[0])}</div>`).join('');
+    m.classList.remove('hidden');
+    m.style.left = Math.max(8, Math.min(x, innerWidth - 260)) + 'px';
+    m.style.top = Math.max(8, Math.min(y, innerHeight - m.offsetHeight - 10)) + 'px';
+    m.onclick = ev => { const d = ev.target.closest('[data-i]'); if (!d) return; m.classList.add('hidden'); guard(items[+d.dataset.i][1]); };
+    setTimeout(() => document.addEventListener('click', () => m.classList.add('hidden'), { once: true }), 0);
+}
 
 function renderSidebar() {
+    if (window.Pomo) window.Pomo.draw();
     $$('.nav-item[data-route]').forEach(a => a.classList.toggle('active', route.name === a.dataset.route));
     $('#side-courses').innerHTML = S.courses.map(c => {
         const recs = c.recordings, dl = recs.filter(r => r.videoExists).length;
@@ -97,7 +109,7 @@ function renderSidebar() {
             <span class="ico">${running.has(c.id) ? '<span class="spin"></span>' : c.lastError ? '<span style="color:var(--err)">!</span>' : '▤'}</span>
             <span class="n">${esc(cname(c))}</span><span class="badge">${dl}/${recs.length}</span></a>`;
     }).join('') || '<div class="faint" style="padding:6px 10px">Nessun corso</div>';
-    $$('#side-courses [data-course]').forEach(a => a.onclick = () => go({ name: 'course', courseId: a.dataset.course, tab: 'lezioni' }));
+    $$('#side-courses [data-course]').forEach(a => a.onclick = () => go({ name: 'course', courseId: a.dataset.course, tab: 'panoramica' }));
     const tr = Object.values(tprog).filter(x => x === 'queued' || typeof x === 'number').length;
     const eng = S.settings.transcription;
     $('#side-status').innerHTML = [
@@ -132,7 +144,7 @@ function viewDashboard(v) {
         <div class="stats">${stat(S.courses.length, 'corsi')}${stat(all.length, 'registrazioni')}${stat(all.filter(r => r.videoExists).length, 'scaricate')}${stat(all.filter(r => r.transcript).length, 'trascritte')}</div>
         <div class="grid">${cards}<div class="course-card add-card" id="d-add"><div style="font-size:1.8em">＋</div><div>Aggiungi corso</div></div></div>
     </div>`;
-    $$('.course-card[data-id]', v).forEach(el => el.onclick = e => { if (!e.target.closest('button')) go({ name: 'course', courseId: el.dataset.id, tab: 'lezioni' }); });
+    $$('.course-card[data-id]', v).forEach(el => el.onclick = e => { if (!e.target.closest('button')) go({ name: 'course', courseId: el.dataset.id, tab: 'panoramica' }); });
     $$('[data-up],[data-down]', v).forEach(b => b.onclick = () => {
         const i = +(b.dataset.up ?? b.dataset.down), j = b.dataset.up !== undefined ? i - 1 : i + 1;
         if (j < 0 || j >= S.courses.length) return;
@@ -148,7 +160,7 @@ function viewDashboard(v) {
 function viewCourse(v) {
     const c = course(route.courseId);
     if (!c) return go({ name: 'dashboard' });
-    const tab = route.tab || 'lezioni';
+    const tab = route.tab || 'panoramica';
     const isRun = running.has(c.id);
     v.innerHTML = `<div class="page">
         <div class="crumbs"><a data-go="dashboard">Dashboard</a> › ${esc(cname(c))}</div>
@@ -157,7 +169,7 @@ function viewCourse(v) {
             <button id="c-folder" class="ghost">Apri cartella</button>
             <button id="c-agent">🤖 Agente AI</button>
             <button id="c-sync" class="${isRun ? '' : 'primary'}">${isRun ? '■ Ferma' : '⟳ Sincronizza'}</button></div>
-        <div class="tabs">${[['lezioni', 'Lezioni'], ['materiale', 'Materiale'], ['note', 'Note'], ['impostazioni', 'Impostazioni']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'active' : ''}">${l}</button>`).join('')}</div>
+        <div class="tabs">${[['panoramica', 'Panoramica'], ['lezioni', 'Lezioni'], ['materiale', 'Materiale'], ['note', 'Note AI'], ['impostazioni', 'Impostazioni']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'active' : ''}">${l}</button>`).join('')}</div>
         <div id="tab"></div></div>`;
     $('[data-go]', v).onclick = () => go({ name: 'dashboard' });
     $$('[data-tab]', v).forEach(b => b.onclick = () => go({ ...route, tab: b.dataset.tab }));
@@ -165,7 +177,7 @@ function viewCourse(v) {
     $('#c-folder', v).onclick = () => guard(() => api.open(c.id, 'root'));
     $('#c-index', v).onclick = () => guard(() => api.open(c.id, 'root', 'INDICE.html'));
     $('#c-agent', v).onclick = () => openAgent(c);
-    ({ lezioni: tabLessons, materiale: tabMaterials, note: tabNotes, impostazioni: tabCourseSettings })[tab](c, $('#tab', v));
+    ({ panoramica: window.tabOverview, lezioni: tabLessons, materiale: tabMaterials, note: tabNotes, impostazioni: tabCourseSettings })[tab](c, $('#tab', v));
 }
 
 const lessonFilter = { q: '', f: 'all' };
@@ -181,6 +193,7 @@ function tabLessons(c, el) {
         <div class="seg">${[['all', 'Tutte'], ['dl', 'Scaricate'], ['todo', 'Da scaricare'], ['nt', 'Da trascrivere']].map(([k, l]) => `<button data-f="${k}" class="${lessonFilter.f === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <span class="grow"></span>
         ${pending ? `<button id="l-tr">🎙 Trascrivi ${pending}</button>` : ''}
+        ${recs.some(r => r.transcript) ? '<button id="l-clean" class="ghost" title="Rimuove ehm, mmm, ripetizioni e frasi inventate da Whisper (gli originali restano in trascrizioni/.orig)">🧹 Pulisci testi</button>' : ''}
         <div class="row"><select id="l-tpl" style="width:auto">${Object.entries(S.templates).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select><button id="l-notes">✨ Per tutte</button></div>
     </div><div class="list" id="l-list"></div>`;
     const draw = () => {
@@ -193,6 +206,7 @@ function tabLessons(c, el) {
     draw();
     $('#l-q', el).oninput = e => { lessonFilter.q = e.target.value; draw(); };
     $$('[data-f]', el).forEach(b => b.onclick = () => { lessonFilter.f = b.dataset.f; tabLessons(c, el); });
+    if ($('#l-clean', el)) $('#l-clean', el).onclick = () => guard(async () => { const r = await api.cleanTranscripts(c.id); toast(`${r.files} trascrizioni pulite, ${r.removed} segmenti rimossi`); });
     if ($('#l-tr', el)) $('#l-tr', el).onclick = () => guard(async () => { const n = await api.transcribe(c.id); toast(`${n} lezioni in coda per la trascrizione`); refresh(); });
     $('#l-notes', el).onclick = () => guard(async () => { const n = await api.notesBatch(c.id, $('#l-tpl', el).value); toast(n ? `Genero note per ${n} lezioni…` : 'Tutte le lezioni trascritte hanno già queste note'); });
 }
@@ -293,7 +307,7 @@ let recData = null;
 function viewRecording(v) {
     const c = course(route.courseId);
     const r = c && c.recordings.find(x => x.key === route.key);
-    if (!r) return go({ name: 'course', courseId: route.courseId, tab: 'lezioni' });
+    if (!r) return go({ name: 'course', courseId: route.courseId, tab: 'panoramica' });
     recData = null;
     v.innerHTML = `<div class="page wide">
         <div class="crumbs"><a data-go="dash">Dashboard</a> › <a data-go="course">${esc(cname(c))}</a> › ${esc(fmtDate(r.isoDate))}</div>
@@ -503,7 +517,9 @@ function viewSettings(v) {
         ${field('Sommario automatico', 'Dopo la trascrizione: breve descrizione degli argomenti, mostrata nel riepilogo del corso', sw('s-sum', s.ai.autoSummary))}
         ${field('Appunti automatici', 'Dopo la trascrizione genera anche gli appunti completi', sw('s-notes', s.ai.autoNotes))}
     </div>
+    <div id="s-extra"></div>
     <div class="row"><span class="faint">Configurazione: ~/.polirec/config.json</span><span class="grow"></span><button class="primary" id="s-save">Salva</button></div></div>`;
+    if (window.settingsExtra) window.settingsExtra(v);
     const set = (k, val) => { S.settings.ui = { ...(S.settings.ui || {}), [k]: val }; applyUi(); };
     $$('[data-seg]', v).forEach(g => $$('button', g).forEach(b => b.onclick = () => {
         $$('button', g).forEach(x => x.classList.toggle('on', x === b));
@@ -566,13 +582,14 @@ function viewSetup(v) {
 const COMMUNITY = [
     { name: 'PoliWebex', by: 'sup3rgiu', url: 'https://github.com/sup3rgiu/PoliWebex', lic: 'MIT', used: 'Base del motore di download WebEx (codice originale in legacy/).' },
     { name: 'PoliDown', by: 'sup3rgiu', url: 'https://github.com/sup3rgiu/PoliDown', lic: 'MIT', used: 'Riferimento per il supporto ai video Microsoft Stream / SharePoint (in programma).' },
-    { name: 'polimi-schedule-js', by: 'bebora', url: 'https://github.com/bebora/polimi-schedule-js', lic: 'MIT', used: 'Orario lezioni → calendario .ics (in integrazione).' },
+    { name: 'polimi-schedule-js', by: 'bebora', url: 'https://github.com/bebora/polimi-schedule-js', lic: 'MIT', used: 'Incluso: converte l\'orario dei Servizi Online nel Calendario dell\'app e in .ics.' },
+    { name: 'Handy', by: 'CJ Pais', url: 'https://github.com/cjpais/Handy', lic: 'MIT', used: 'Ispirazione: dettatura push-to-talk negli appunti e motore Parakeet (opzionale).' },
     { name: 'WeBeepSync', by: 'Tommaso Morganti', url: 'https://github.com/toto04/webeep-sync', lic: 'GPL-3.0', used: 'Ispirazione per la sincronizzazione incrementale del materiale WeBeep (reimplementata da zero). In programma: accesso tramite token dell\'app mobile Moodle.' },
     { name: 'PoliMi Webex Enhancer', by: 'Francesco Vagli', url: 'https://github.com/fravagli/Polimi-webex-enhancer', lic: 'GPL-3.0', used: 'Ispirazione: player offline, salto dei silenzi, testo sincronizzato (reimplementati).' },
     { name: 'WebXDownloader', by: 'jacopo-j', url: 'https://github.com/jacopo-j/WebXDownloader', lic: 'MIT', used: 'Riferimento per le API di download WebEx.' },
     { name: 'Polimi Exam Calendar', by: 'frephs', url: 'https://github.com/frephs/polimi-exam-calendar', lic: 'MIT', used: 'Estensione browser: calendario nella pagina iscrizione esami.' },
-    { name: '@alpolimibot', by: 'riccardosalemme', url: 'https://github.com/riccardosalemme/alpolimibot', lic: 'GPL-3.0', used: 'Aule libere e occupazione biblioteche (bot Telegram).' },
-    { name: 'PoliAule', by: 'PoliNetwork', url: 'https://poliaule.com', lic: '—', used: 'Trova aule libere.' },
+    { name: '@alpolimibot', by: 'riccardosalemme', url: 'https://github.com/riccardosalemme/alpolimibot', lic: 'GPL-3.0', used: 'Ispirazione per la sezione Aule libere (client per le API pubbliche Polimi scritto da zero).' },
+    { name: 'PoliAule', by: 'PoliNetwork', url: 'https://poliaule.com', lic: '—', used: 'Ispirazione per la sezione Aule libere.' },
     { name: 'PoliAuth', by: 'PoliAuth', url: 'https://github.com/PoliAuth/PoliAuthenticator', lic: 'nessuna', used: 'Login automatico ai Servizi Online (solo link: senza licenza non è integrabile).' },
     { name: 'PoliPlease', by: 'Alessandro Berardi', url: 'https://github.com/berryno/PoliPlease', lic: 'nessuna', used: 'Orario settimanale personalizzabile (solo link).' },
     { name: 'Materiali e Appunti', by: 'PoliNetwork', url: 'https://polinetwork.org/it/materials/', lic: '—', used: 'Archivio di appunti degli studenti.' },
@@ -629,7 +646,7 @@ function openAddCourse() {
     $('#a-cancel', el).onclick = m.close;
     $('#a-ok', el).onclick = () => guard(async () => {
         const c = await api.addCourse({ input: $('#a-in', el).value, dir: $('#a-dir', el).value, name: $('#a-name', el).value, language: $('#a-lang', el).value, materials: $('#a-mat', el).checked });
-        m.close(); await refresh(); go({ name: 'course', courseId: c.id, tab: 'lezioni' });
+        m.close(); await refresh(); go({ name: 'course', courseId: c.id, tab: 'panoramica' });
         api.sync([c.id]);
     });
 }
@@ -684,7 +701,7 @@ api.on(e => {
         case 'transcribe-done': delete tprog[e.video]; log('✓ Trascritto ' + e.video.split(/[\\/]/).pop(), false); softRefresh(); break;
         case 'transcribe-error': tprog[e.video] = { error: e.error }; log('✗ ' + e.error); soft(); break;
         case 'ai-start': log(`✨ ${(S && S.tools.ai[e.provider] || {}).label || 'AI'} al lavoro…`); if (aiStream) aiStream.textContent = ''; break;
-        case 'ai-chunk': if (aiStream) { aiStream.textContent += e.chunk; aiStream.scrollTop = 1e9; } break;
+        case 'ai-chunk': if (window.aiStreamTarget) { window.aiStreamTarget.textContent += e.chunk; } else if (aiStream) { aiStream.textContent += e.chunk; aiStream.scrollTop = 1e9; } break;
         case 'ai-done': log('✓ AI completato' + (e.file ? ': ' + e.file : ''), false); softRefresh(); break;
         case 'ai-error': log('✗ AI: ' + e.error); if (aiStream) aiStream.textContent += '\n\n✗ ' + e.error; break;
         case 'setup-step': { const st = $('#st-' + e.step); if (st) { $('.s', st).innerHTML = e.status === 'done' ? '<span style="color:var(--ok)">✓</span>' : '<span class="spin"></span>'; $('.d', st).textContent = e.detail; } break; }

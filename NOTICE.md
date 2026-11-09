@@ -1,31 +1,57 @@
 # Crediti e licenze di terze parti
 
-PoliRec nasce dal lavoro della community studentesca del Politecnico di Milano
-(progetti raccolti da [PoliNetwork](https://polinetwork.org/it/projects/)).
+PoliRec è distribuito con licenza **MIT** (vedi `LICENSE`). Nasce dal lavoro della community
+studentesca del Politecnico di Milano, in particolare dei progetti raccolti da
+[PoliNetwork](https://polinetwork.org/it/projects/).
 
-## Codice derivato / integrato
+> PoliRec è un'app **non ufficiale**: non è affiliata, approvata o supportata dal Politecnico di Milano.
+> I marchi citati appartengono ai rispettivi proprietari.
+
+## Codice della community incluso o derivato
 
 | Progetto | Autore | Licenza | Uso in PoliRec |
 |---|---|---|---|
-| [PoliWebex](https://github.com/sup3rgiu/PoliWebex) | sup3rgiu | MIT | Base del motore di download WebEx (API `recordings/<id>/stream`, fallback di download). Il codice originale modificato è in `legacy/`. |
-| [PoliDown](https://github.com/sup3rgiu/PoliDown) | sup3rgiu | MIT | Riferimento per il supporto ai video Microsoft Stream/SharePoint (in programma). |
+| [PoliWebex](https://github.com/sup3rgiu/PoliWebex) | sup3rgiu | MIT | Base del motore di download WebEx. Il codice originale modificato è in `legacy/`. |
+| [polimi-schedule-js](https://github.com/bebora/polimi-schedule-js) | bebora | MIT | **Incluso** in `src/vendor/polimi-schedule-js/` (non modificato): conversione dell'orario dei Servizi Online in eventi/iCalendar. |
+| [PoliDown](https://github.com/sup3rgiu/PoliDown) | sup3rgiu | MIT | Riferimento per il supporto futuro ai video Microsoft Stream/SharePoint. |
 | [WebXDownloader](https://github.com/jacopo-j/WebXDownloader) | jacopo-j | MIT | Riferimento per le API di download WebEx. |
-| [polimi-schedule-js](https://github.com/bebora/polimi-schedule-js) | bebora | MIT | Conversione orario → .ics (integrazione pianificata). |
 
-## Idee reimplementate (nessun codice copiato)
+## Idee reimplementate da zero (nessun codice copiato)
 
 | Progetto | Autore | Licenza | Idea |
 |---|---|---|---|
-| [WeBeepSync](https://github.com/toto04/webeep-sync) | Tommaso Morganti | GPL-3.0 | Sincronizzazione incrementale dei file WeBeep. In programma: accesso tramite token dell'app mobile Moodle. |
+| [WeBeepSync](https://github.com/toto04/webeep-sync) | Tommaso Morganti | GPL-3.0 | Sincronizzazione incrementale dei file WeBeep. |
 | [PoliMi Webex Enhancer](https://github.com/fravagli/Polimi-webex-enhancer) | Francesco Vagli | GPL-3.0 | Player offline, salto dei silenzi, testo sincronizzato col video. |
+| [@alpolimibot](https://github.com/riccardosalemme/alpolimibot) / [PoliAule](https://poliaule.com) | riccardosalemme / PoliNetwork | GPL-3.0 / — | Aule libere dalle API pubbliche del Politecnico (`maps_rest`), con un client scritto da zero. |
+| [Handy](https://github.com/cjpais/Handy) | CJ Pais | MIT | Dettatura push-to-talk con trascrizione locale e uso del modello Parakeet. |
 
 I progetti senza licenza (PoliAuth, PoliPlease, PoliDL-GUI, polimi-schedule, TdeMerger…) sono solo
-linkati nella pagina *Community* dell'app: senza una licenza non è possibile riutilizzarne il codice.
+linkati nella pagina *Community*: senza licenza il loro codice non può essere riutilizzato.
 
-## Componenti inclusi
+## Componenti inclusi nell'app
 
-- [Electron](https://www.electronjs.org/) — MIT
-- [Puppeteer](https://pptr.dev/) (puppeteer-core) — Apache-2.0
-- [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) — GPL-3.0 (binario FFmpeg distribuito come programma separato)
-- [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — SIL Open Font License 1.1 (`src/renderer/fonts/`)
-- Whisper / mlx-whisper / faster-whisper — MIT, installati dal setup nell'ambiente privato dell'utente
+| Componente | Licenza |
+|---|---|
+| [Electron](https://www.electronjs.org/) | MIT |
+| [puppeteer-core](https://pptr.dev/) | Apache-2.0 |
+| [CodeMirror 6](https://codemirror.net/) | MIT |
+| [markdown-it](https://github.com/markdown-it/markdown-it) | MIT |
+| [KaTeX](https://katex.org/) (codice e font) | MIT |
+| [luxon](https://moment.github.io/luxon/), [uuid](https://github.com/uuidjs/uuid) | MIT |
+| [immutable-ics](https://github.com/angeloashmore/immutable-ics) | ISC |
+| [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | SIL Open Font License 1.1 (`src/renderer/fonts/`) |
+| [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) | GPL-3.0. È il binario FFmpeg, distribuito come programma separato e invocato come processo esterno. Licenza e note di build in `ffmpeg.LICENSE` / `ffmpeg.README` dentro `app.asar.unpacked/node_modules/ffmpeg-static/`. Sorgenti: https://ffmpeg.org/download.html |
+
+## Scaricati al primo uso (non ridistribuiti)
+
+| Componente | Licenza | Quando |
+|---|---|---|
+| [Typst](https://github.com/typst/typst) | Apache-2.0 | Editor Typst |
+| [Tectonic](https://github.com/tectonic-typesetting/tectonic) | MIT. Il bundle TeX contiene pacchetti con licenze libere (LPPL ecc.) | Editor LaTeX |
+| [mlx-whisper](https://github.com/ml-explore/mlx-examples) / [faster-whisper](https://github.com/SYSTRAN/faster-whisper) / [openai-whisper](https://github.com/openai/whisper) e pesi Whisper | MIT | Setup trascrizione |
+| [parakeet-mlx](https://github.com/senstella/parakeet-mlx) | Apache-2.0 | Motore Parakeet (opzionale) |
+| [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | CC-BY-4.0 (attribuzione: NVIDIA) | Motore Parakeet (opzionale) |
+| [uv](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | Solo se non c'è un Python adatto |
+
+Gli strumenti AI esterni (Antigravity CLI, Claude Code, Gemini CLI) non sono inclusi: PoliRec li richiama
+solo se l'utente li ha installati, e valgono i loro termini d'uso.

@@ -129,4 +129,13 @@ async function install(rec, { onStep = () => { }, onLog = () => { } } = {}) {
     return { engine: rec.engine, model: rec.model, python: py, device: rec.cuda ? 'cuda' : 'auto' };
 }
 
-module.exports = { detect, recommend, install, VENV, venvPython };
+/** Add an extra engine package to the private env (e.g. parakeet-mlx). */
+async function addPackage(pkg, onLog = () => { }) {
+    const py = venvPython();
+    if (!fs.existsSync(py)) throw new Error('Esegui prima il setup');
+    const uv = dl.which('uv');
+    if (uv) await run(uv, ['pip', 'install', '--python', py, pkg], { onLine: onLog });
+    else await run(py, ['-m', 'pip', 'install', pkg], { onLine: onLog });
+}
+
+module.exports = { detect, recommend, install, addPackage, VENV, venvPython };
