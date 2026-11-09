@@ -100,7 +100,7 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
             let s = config::load()["settings"].clone();
             let prov = match p.str_of("provider") {
                 Some(x) => x.to_string(),
-                None => ai::pick(&s)?,
+                None => d.provider()?,
             };
             let preamble = format!("Stai lavorando nella cartella di un corso universitario ({}). Struttura: video/ (registrazioni), trascrizioni/ (trascrizioni Whisper .txt/.srt, possono contenere errori), materiale/ (slide e PDF del corso), note/ (appunti in Markdown), INDICE.md. Salva sempre i file che produci dentro note/ in formato Markdown. Non modificare né cancellare video, trascrizioni e materiale.\n\nRichiesta: ", util::s(&c, "name"));
             let job = uuid::Uuid::new_v4().to_string();
@@ -116,6 +116,7 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
                 }
                 Err(e) => {
                     d.send(json!({ "type": "ai-error", "jobId": job, "error": e.to_string() }));
+                    d.ai_problem(&prov, &e);
                     Err(e)
                 }
             }
@@ -124,6 +125,18 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
         "ai:assist" => assist(d, &p).await,
         "ai:backfill" => Ok(json!(d.ai_backfill(p.as_array().map(|_| util::str_list(Some(&p)))))),
         "ai:queue" => Ok(d.ai_queue_info()),
+        "ai:use" => {
+            d.ai_use(p.req("provider")?, util::b(&p, "remember"))?;
+            Ok(d.ai_queue_info())
+        }
+        "ai:wait" => {
+            d.ai_wait();
+            Ok(json!(true))
+        }
+        "ai:resume" => {
+            d.ai_resume();
+            Ok(json!(true))
+        }
         "course:genPage" => {
             let id = p.as_str().unwrap_or("").to_string();
             let c = config::course(&id)?;
@@ -152,7 +165,7 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
         "search:query" => search::query(&config::load(), p["text"].as_str().unwrap_or(""), p.str_of("courseId"), p["k"].as_u64().unwrap_or(20)).await,
         "search:ask" => {
             let c0 = config::load();
-            let prov = ai::pick(&c0["settings"])?;
+            let prov = d.provider()?;
             let job = uuid::Uuid::new_v4().to_string();
             d.send(json!({ "type": "ai-start", "jobId": job, "provider": prov, "ask": true }));
             let (d2, j2) = (d.clone(), job.clone());
@@ -160,7 +173,10 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
             let r = search::ask(&c0, &prov, p["question"].as_str().unwrap_or(""), p.str_of("courseId"), &on).await;
             match &r {
                 Ok(_) => d.send(json!({ "type": "ai-done", "jobId": job, "ask": true })),
-                Err(e) => d.send(json!({ "type": "ai-error", "jobId": job, "error": e.to_string() })),
+                Err(e) => {
+                    d.send(json!({ "type": "ai-error", "jobId": job, "error": e.to_string() }));
+                    d.ai_problem(&prov, e);
+                }
             }
             r
         }
@@ -433,8 +449,8 @@ pub fn cli_exe() -> std::path::PathBuf {
 
 /// AI chat for a note. Edits come back as a full revised document → shown inline as accept/reject changes.
 async fn assist(d: &Arc<Daemon>, p: &Value) -> Result<Value> {
-    let s = config::load()["settings"].clone();
-    let prov = ai::pick(&s)?;
+    let _ = ();
+    let prov = d.provider()?;
     let kind = p["kind"].as_str().unwrap_or("markdown");
     let lang = match kind {
         "latex" => "LaTeX",

@@ -2,7 +2,7 @@
 use crate::daemon::Daemon;
 use anyhow::{anyhow, bail, Result};
 use polirec_core::rpc::Params;
-use polirec_core::{ai, api, config, library as lib, search, util};
+use polirec_core::{api, config, library as lib, search, util};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -64,7 +64,14 @@ pub async fn call(d: &Arc<Daemon>, f: &str, p: Value) -> Result<Value> {
                 Some(x) => Some(util::s(&api::find_course(Some(x))?, "id").to_string()),
                 None => None,
             };
-            let r = search::ask(&c0, &ai::pick(&c0["settings"])?, p.req("question")?, cid.as_deref(), &|_| {}).await?;
+            let prov = d.provider()?;
+            let r = match search::ask(&c0, &prov, p.req("question")?, cid.as_deref(), &|_| {}).await {
+                Ok(r) => r,
+                Err(e) => {
+                    d.ai_problem(&prov, &e);
+                    return Err(e);
+                }
+            };
             let sources: Vec<String> = r["sources"].as_array().into_iter().flatten().enumerate().map(|(i, x)| {
                 let m = &x["meta"];
                 let t = if util::truthy(m.get("title")) { util::s(m, "title") } else { util::s(m, "file") };

@@ -221,10 +221,32 @@
         if (d) { A.drivesShown.add(d.path); driveModal(d); }
     }
 
+    // ───────── AI tool out of quota / not logged in ─────────
+    let aiModalFor = null;
+    function aiLimitModal(e) {
+        if (aiModalFor === e.provider && document.querySelector('.ai-limit')) return;
+        aiModalFor = e.provider;
+        const when = e.resetsAt ? new Date(e.resetsAt).toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '';
+        const alt = e.alternatives || [], inst = e.installable || [];
+        const m = modal(`<div class="ai-limit drive-pop">
+            <div class="dp-ico">⚠️</div>
+            <h2>${esc(e.label)} ${e.kind === 'quota' ? 'ha esaurito la quota' : 'richiede il login'}</h2>
+            <p>${e.kind === 'quota' ? (when ? `La quota si riazzera ${esc(when)}.` : 'Riprova più tardi.') : `Accedi dal terminale (${esc(e.provider)}) e riprova.`} Le note AI in coda sono in pausa.</p>
+            <p class="faint" style="font-size:.85em">${esc(e.error)}</p>
+            ${alt.length ? `<p><b>Vuoi usare un altro strumento?</b></p><div class="row" style="display:flex;gap:8px;flex-wrap:wrap">${alt.map(a => `<button class="primary" data-use="${a.id}">Usa ${esc(a.label)}</button>`).join('')}</div>
+                <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="al-rem"> Usalo sempre (cambia l'impostazione)</label>`
+                : '<p><b>Non ci sono altri strumenti AI installati.</b></p>'}
+            ${inst.length ? `<details><summary>Installa un altro strumento</summary><ul>${inst.map(i => `<li><b>${esc(i.label)}</b>${i.install && i.install.cmd ? ` — <code>${esc(i.install.cmd)}</code>` : ''}${i.install && i.install.login ? `, poi <code>${esc(i.install.login)}</code>` : ''}</li>`).join('')}</ul></details>` : ''}
+            <div class="row end"><button id="al-wait">${e.kind === 'quota' ? 'Aspetta il reset' : 'Più tardi'}</button></div></div>`);
+        $$('[data-use]', m.el).forEach(b => b.onclick = () => guard(async () => { await api.aiSwitch.use(b.dataset.use, $('#al-rem', m.el).checked); m.close(); toast('Note AI riprese con ' + b.textContent.replace(/^Usa /, '')); load(); }));
+        $('#al-wait', m.el).onclick = () => guard(async () => { await api.aiSwitch.wait(); m.close(); });
+    }
+
     // ───────── events ─────────
     api.on(e => {
         switch (e.type) {
             case 'activity-log': addLog(e.entry); break;
+            case 'ai-limit': aiLimitModal(e); load(); break;
             case 'activity': load(); break;
             case 'progress': liveProgress(e); break;
             case 'transcribe-progress': liveTranscribe(e); break;

@@ -24,7 +24,7 @@ pub const METHODS: &[&str] = &[
     "assistant:info", "assistant:addClaude",
     "activity:list", "activity:log", "download:pause", "download:resume", "downloads:pauseAll", "downloads:resumeAll",
     "transcribe:pause", "transcribe:resume", "transcriptions:pauseAll", "transcriptions:resumeAll",
-    "drives:status", "drive:wait", "login:done", "login:cancel",
+    "drives:status", "drive:wait", "login:done", "login:cancel", "ai:use", "ai:wait", "ai:resume",
 ];
 
 /// Run blocking filesystem work off the async workers.

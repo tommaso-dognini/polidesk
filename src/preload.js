@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('polirec', {
         pauseTranscription: video => invoke('transcribe:pause', { video }), resumeTranscription: video => invoke('transcribe:resume', { video }),
         pauseTranscriptions: () => invoke('transcriptions:pauseAll'), resumeTranscriptions: () => invoke('transcriptions:resumeAll'),
     },
+    aiSwitch: { use: (provider, remember) => invoke('ai:use', { provider, remember }), wait: () => invoke('ai:wait'), resume: () => invoke('ai:resume') },
     drives: { status: () => invoke('drives:status'), wait: ids => invoke('drive:wait', ids) },
     on: cb => ipcRenderer.on('evt', (_, e) => cb(e)),
 });

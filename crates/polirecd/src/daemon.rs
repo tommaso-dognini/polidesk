@@ -52,6 +52,12 @@ pub struct Daemon {
     logins: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Vec<Value>>>>>,
     /// connected app windows (logins go to the app when there is one)
     pub ui_clients: std::sync::atomic::AtomicUsize,
+    ai_running: AtomicBool,
+    /// AI queue paused because a tool hit its quota / needs a login: { provider, label, kind, error, resetsAt }
+    ai_paused: Mutex<Option<Value>>,
+    /// tool chosen "just for now" after a quota problem (the setting is not changed)
+    ai_override: Mutex<Option<String>>,
+    ai_wait: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Daemon {
@@ -81,6 +87,10 @@ impl Daemon {
             activity: Default::default(),
             logins: Default::default(),
             ui_clients: Default::default(),
+            ai_running: AtomicBool::new(false),
+            ai_paused: Default::default(),
+            ai_override: Default::default(),
+            ai_wait: Default::default(),
         })
     }
     pub fn send(&self, v: Value) {
@@ -270,11 +280,12 @@ impl Daemon {
     // ───────── AI queue (sequential, visible in the UI) ─────────
     fn ai_queue_state(&self) {
         let q = self.aiq.lock().unwrap();
-        self.send(json!({ "type": "ai-queue", "pending": q.0.len(), "current": q.1.as_ref().map(|c| c.1.clone()), "items": q.0.iter().take(20).map(|j| j.label.clone()).collect::<Vec<_>>() }));
+        self.send(json!({ "type": "ai-queue", "pending": q.0.len(), "current": q.1.as_ref().map(|c| c.1.clone()), "items": q.0.iter().take(20).map(|j| j.label.clone()).collect::<Vec<_>>(), "paused": *self.ai_paused.lock().unwrap() }));
     }
     pub fn ai_queue_info(&self) -> Value {
         let q = self.aiq.lock().unwrap();
-        json!({ "pending": q.0.len(), "current": q.1.as_ref().map(|c| c.1.clone()) })
+        let prov = self.provider().ok();
+        json!({ "pending": q.0.len(), "current": q.1.as_ref().map(|c| c.1.clone()), "paused": *self.ai_paused.lock().unwrap(), "providerLabel": prov.as_deref().map(ai::label), "provider": prov })
     }
     pub fn enqueue_ai<F, Fut>(self: &Arc<Self>, id: String, label: String, f: F)
     where
@@ -287,7 +298,7 @@ impl Daemon {
                 return;
             }
             q.0.push_back(AiJob { id, label, run: Box::new(move |d| Box::pin(f(d))) });
-            q.1.is_none()
+            self.ai_paused.lock().unwrap().is_none() && !self.ai_running.swap(true, Ordering::SeqCst)
         };
         self.ai_queue_state();
         if start {
@@ -299,6 +310,10 @@ impl Daemon {
         loop {
             let job = {
                 let mut q = self.aiq.lock().unwrap();
+                if self.ai_paused.lock().unwrap().is_some() {
+                    q.1 = None;
+                    break;
+                }
                 match q.0.pop_front() {
                     Some(j) => {
                         q.1 = Some((j.id.clone(), j.label.clone()));
@@ -313,19 +328,103 @@ impl Daemon {
             self.ai_queue_state();
             let label = job.label.clone();
             if let Err(e) = (job.run)(self.clone()).await {
-                self.log(format!("✗ AI · {label}: {e}"), None);
-                self.send(json!({ "type": "ai-failed", "label": label, "error": e.to_string() }));
+                // quota / login problems pause the queue (see ai_problem): the job comes back with the backfill
+                if self.ai_paused.lock().unwrap().is_none() {
+                    self.log(format!("✗ AI · {label}: {e}"), None);
+                    self.send(json!({ "type": "ai-failed", "label": label, "error": e.to_string() }));
+                }
             }
         }
+        self.ai_running.store(false, Ordering::SeqCst);
         self.ai_queue_state();
         self.refresh();
+    }
+
+    /// AI tool to use: the one chosen after a quota problem, else the setting (or the first installed).
+    pub fn provider(&self) -> Result<String> {
+        if let Some(o) = self.ai_override.lock().unwrap().clone().filter(|o| ai::installed(o)) {
+            return Ok(o);
+        }
+        ai::pick(&config::load()["settings"])
+    }
+
+    /// An AI call failed. Quota reached / login needed: pause the AI queue and ask the student which
+    /// tool to use instead (event "ai-limit"). Returns true when that happened.
+    pub fn ai_problem(self: &Arc<Self>, provider: &str, err: &anyhow::Error) -> bool {
+        let msg = err.to_string();
+        let Some(info) = ai::limit_info(&msg) else { return false };
+        let resets_at = info["resetsInSec"].as_i64().map(|s| util::iso(chrono::Utc::now() + chrono::Duration::seconds(s)));
+        let alternatives: Vec<Value> = ai::PROVIDERS.iter().filter(|p| p.id != provider && ai::installed(p.id)).map(|p| json!({ "id": p.id, "label": p.label })).collect();
+        let installable: Vec<Value> = ai::PROVIDERS.iter().filter(|p| !ai::installed(p.id)).map(|p| json!({ "id": p.id, "label": p.label, "install": ai::install_hint(p.id) })).collect();
+        let ev = json!({
+            "type": "ai-limit", "provider": provider, "label": ai::label(provider), "kind": info["kind"], "error": util::take(&msg, 400),
+            "resetsAt": resets_at, "alternatives": alternatives, "installable": installable,
+        });
+        let first = {
+            let mut p = self.ai_paused.lock().unwrap();
+            let first = p.as_ref().map(|x| util::s(x, "provider") != provider).unwrap_or(true);
+            *p = Some(ev.clone());
+            first
+        };
+        if first {
+            let why = if util::s(&info, "kind") == "quota" { "quota esaurita" } else { "serve il login" };
+            self.log(format!("⚠ {} non disponibile ({why}): note AI in pausa", ai::label(provider)), None);
+            self.notify(format!("{} non è disponibile ({why}): scegli un altro strumento AI in PoliRec", ai::label(provider)));
+        }
+        self.send(ev);
+        self.ai_queue_state();
+        true
+    }
+
+    /// Continue the AI queue with `provider` (remember = also change the setting).
+    pub fn ai_use(self: &Arc<Self>, provider: &str, remember: bool) -> Result<()> {
+        if !ai::installed(provider) {
+            bail!("{} non è installato", ai::label(provider));
+        }
+        if remember {
+            config::patch_settings(|s| s["ai"]["provider"] = json!(provider))?;
+            *self.ai_override.lock().unwrap() = None;
+        } else {
+            *self.ai_override.lock().unwrap() = Some(provider.to_string());
+        }
+        self.log(format!("✓ Note AI con {}{}", ai::label(provider), if remember { " (impostazione aggiornata)" } else { " per ora" }), None);
+        self.ai_resume();
+        Ok(())
+    }
+    /// Keep the queue paused until the quota resets (or one hour), then try again.
+    pub fn ai_wait(self: &Arc<Self>) {
+        let at = self.ai_paused.lock().unwrap().as_ref().and_then(|p| p["resetsAt"].as_str().and_then(util::parse_date));
+        let secs = at.map(|t| (t - chrono::Utc::now()).num_seconds().max(60)).unwrap_or(3600) as u64;
+        let d = self.clone();
+        let h = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(secs + 30)).await;
+            d.ai_resume();
+        });
+        if let Some(old) = self.ai_wait.lock().unwrap().replace(h) {
+            old.abort();
+        }
+        self.log(format!("⏳ Note AI in pausa fino al reset ({})", at.map(|t| util::it_datetime(t.with_timezone(&chrono::Local))).unwrap_or_else(|| "tra un'ora".into())), None);
+    }
+    pub fn ai_resume(self: &Arc<Self>) {
+        *self.ai_paused.lock().unwrap() = None;
+        if let Some(h) = self.ai_wait.lock().unwrap().take() {
+            h.abort();
+        }
+        self.send(json!({ "type": "ai-resumed" }));
+        let start = !self.aiq.lock().unwrap().0.is_empty() && !self.ai_running.swap(true, Ordering::SeqCst);
+        if start {
+            let d = self.clone();
+            tokio::spawn(async move { d.run_ai_queue().await });
+        }
+        self.ai_backfill(None); // jobs that failed on the quota come back
+        self.ai_queue_state();
     }
 
     /// Queue whatever AI output is enabled but missing (also for lessons transcribed earlier).
     pub fn ai_backfill(self: &Arc<Self>, course_ids: Option<Vec<String>>) -> usize {
         let c0 = config::load();
         let s = c0["settings"]["ai"].clone();
-        if ai::pick(&c0["settings"]).is_err() {
+        if self.provider().is_err() {
             return 0;
         }
         let mut n = 0;
@@ -376,7 +475,7 @@ impl Daemon {
         let settings = config::load()["settings"].clone();
         let prov = match provider.filter(|p| !p.is_empty()) {
             Some(p) => p,
-            None => ai::pick(&settings)?,
+            None => self.provider()?,
         };
         let job = uuid::Uuid::new_v4().to_string();
         self.send(json!({ "type": "ai-start", "jobId": job, "course": course_id, "key": key, "template": template, "provider": prov }));
@@ -393,6 +492,7 @@ impl Daemon {
             }
             Err(e) => {
                 self.send(json!({ "type": "ai-error", "jobId": job, "error": e.to_string() }));
+                self.ai_problem(&prov, &e);
                 Err(e)
             }
         }
@@ -468,8 +568,14 @@ impl Daemon {
             "Scrivi la scheda del corso universitario \"{fullname}\" in italiano, Markdown, BREVE (massimo ~150 parole). Usa SOLO le informazioni fornite, niente inventato. Formato esatto:\n**In breve** — 2-3 frasi su di cosa tratta il corso.\n\n**Docenti** — nomi (e ruolo se emerge: lezioni, esercitazioni, laboratori).\n\n**Esame** — modalità d'esame in 1-3 punti (scritto/orale/progetto/homework, pesi, regole). Se non emerge dalle fonti scrivi «Non ancora indicata nelle lezioni».\n\n**Orario** — una riga per lezione settimanale, solo se fornito.\nNient'altro: niente titoli #, niente programma dettagliato, niente premesse."
         );
         let input = format!("<corso>{fullname}</corso>\n<docenti>{}</docenti>\n<sommari>\n{}\n</sommari>\n<esame>\n{exam}\n</esame>\n<orario>\n{}\n</orario>", teachers.join(", "), summaries.join("\n"), slots.join("\n"));
-        let prov = ai::pick(&c0["settings"])?;
-        let md = ai::run_prompt(&prov, &prompt, &input, util::s(&c0["settings"]["ai"], "model"), &std::env::temp_dir(), &|_| {}).await?;
+        let prov = self.provider()?;
+        let md = match ai::run_prompt(&prov, &prompt, &input, util::s(&c0["settings"]["ai"], "model"), &std::env::temp_dir(), &|_| {}).await {
+            Ok(m) => m,
+            Err(e) => {
+                self.ai_problem(&prov, &e);
+                return Err(e);
+            }
+        };
         let n_sum = summaries.len();
         ws::update(Some(&data_dir), |x| {
             x["page"] = json!(format!("<!-- polirec:auto {} — generata dall'AI, modificala liberamente: non verrà più sovrascritta -->\n{}\n", util::take(&util::now_iso(), 10), md.trim()));
@@ -755,7 +861,7 @@ impl Daemon {
         let Some(tr) = rec["transcript"].as_str() else { bail!("Serve la trascrizione della lezione") };
         let text = std::fs::read_to_string(lib::course_dirs(&dir).transcripts.join(tr))?;
         let settings = config::load()["settings"].clone();
-        let prov = ai::pick(&settings)?;
+        let prov = self.provider()?;
         let h: Vec<String> = history.as_array().map(|a| a[a.len().saturating_sub(6)..].to_vec()).unwrap_or_default().iter().map(|h| format!("{}: {}", if util::s(h, "role") == "user" { "Studente" } else { "Tutor" }, util::s(h, "text"))).collect();
         let title = [util::s(&rec, "displayTitle"), util::s(&rec, "topic")].into_iter().find(|x| !x.is_empty()).unwrap_or("");
         let prompt = format!(
@@ -773,6 +879,7 @@ impl Daemon {
             }
             Err(e) => {
                 self.send(json!({ "type": "ai-error", "jobId": job, "error": e.to_string() }));
+                self.ai_problem(&prov, &e);
                 Err(e)
             }
         }
@@ -792,6 +899,7 @@ impl Daemon {
             }
             Err(e) => {
                 self.send(json!({ "type": "ai-error", "jobId": job, "error": e.to_string() }));
+                self.ai_problem(provider, &e);
                 Err(e)
             }
         }
