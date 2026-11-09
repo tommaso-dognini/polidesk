@@ -16,10 +16,22 @@ const notes = require('./core/notes');
 const ai = require('./core/ai');
 const cleaner = require('./core/cleaner');
 const setup = require('./core/setup');
+const cloud = require('./core/cloud');
+const integ = require('./core/integrations');
 const { APP_DIR } = require('./core/paths');
 const pkg = require('../package.json');
 
 let hwCache = null;
+
+/** The configured AI CLI, or the first one installed (works on any machine). */
+function pickProvider(settings) {
+    const av = ai.available();
+    const want = settings.ai && settings.ai.provider;
+    if (want && av[want] && av[want].path) return want;
+    const first = ['agy', 'claude', 'gemini'].find(k => av[k] && av[k].path);
+    if (!first) throw new Error('Nessuno strumento AI installato: installa Antigravity CLI, Claude Code o Gemini CLI e sceglilo in Impostazioni → AI');
+    return first;
+}
 function hardware() {
     if (!hwCache) {
         const hw = setup.detect();
@@ -33,9 +45,14 @@ function hardware() {
     return hwCache;
 }
 
-function register({ handle, send, cfg, findCourse, getSession, closeSession, isSyncing }) {
-    const courseDir = id => (id ? findCourse(id).dir : null);
-    const notesRoot = () => cfg().settings.notesRoot || path.join(os.homedir(), 'Documents', 'PoliRec Appunti');
+function register({ handle, send, cfg, findCourse, getSession, closeSession, isSyncing, onNotesChanged = () => { } }) {
+    // notes + workspace live in the cloud folder when sync is on, otherwise in the course folder
+    const courseDir = id => {
+        const s = cfg().settings;
+        if (!id) return cloud.root(s) || null;          // global workspace (null → ~/.polirec)
+        return cloud.courseDataDir(s, findCourse(id));
+    };
+    const notesRoot = () => cloud.generalNotesDir(cfg().settings);
     const notesDir = scope => scope ? notes.dirFor(courseDir(scope)) : notesRoot();
 
     // ── hardware recommendations ──
@@ -53,15 +70,15 @@ function register({ handle, send, cfg, findCourse, getSession, closeSession, isS
 
     // ── workspace (course page, todos, pomodoro) ──
     handle('ws:get', async courseId => { const w = ws.load(courseDir(courseId)); return { ...w, stats: ws.stats(w) }; });
-    handle('ws:page', async ({ courseId, text }) => { ws.update(courseDir(courseId), w => { w.page = text; }); return true; });
+    handle('ws:page', async ({ courseId, text }) => { ws.update(courseDir(courseId), w => { w.page = text; }); onNotesChanged(courseId); return true; });
     handle('ws:todo:add', async ({ courseId, todo }) => ws.todo.add(courseDir(courseId), todo).todos);
     handle('ws:todo:set', async ({ courseId, id, patch }) => ws.todo.set(courseDir(courseId), id, patch).todos);
     handle('ws:todo:remove', async ({ courseId, id }) => ws.todo.remove(courseDir(courseId), id).todos);
     handle('ws:pomodoro', async ({ courseId, minutes, kind, start }) => ws.stats(ws.logPomodoro(courseDir(courseId), { minutes, kind, start })));
     handle('ws:all-todos', async () => {
         const all = [];
-        const g = ws.load(null); g.todos.forEach(t => all.push({ ...t, courseId: null, course: 'Generale' }));
-        for (const c of cfg().courses) { try { ws.load(c.dir).todos.forEach(t => all.push({ ...t, courseId: c.id, course: c.name || c.input })); } catch (e) { } }
+        const g = ws.load(courseDir(null)); g.todos.forEach(t => all.push({ ...t, courseId: null, course: 'Generale' }));
+        for (const c of cfg().courses) { try { ws.load(cloud.courseDataDir(cfg().settings, c)).todos.forEach(t => all.push({ ...t, courseId: c.id, course: c.name || c.input })); } catch (e) { } }
         return all;
     });
 
@@ -95,7 +112,7 @@ function register({ handle, send, cfg, findCourse, getSession, closeSession, isS
     handle('notes:scopes', async () => [{ id: null, name: 'Generale', dir: notesRoot() }].concat(cfg().courses.map(c => ({ id: c.id, name: c.name || c.input, dir: notes.dirFor(c.dir) }))));
     handle('notes:list', async scope => notes.list(notesDir(scope)));
     handle('notes:read', async ({ scope, file }) => notes.read(notesDir(scope), file));
-    handle('notes:write', async ({ scope, file, content }) => notes.write(notesDir(scope), file, content));
+    handle('notes:write', async ({ scope, file, content }) => { const r = notes.write(notesDir(scope), file, content); onNotesChanged(scope); return r; });
     handle('notes:create', async ({ scope, title, kind }) => notes.create(notesDir(scope), title, kind));
     handle('notes:rename', async ({ scope, file, name }) => notes.rename(notesDir(scope), file, name));
     handle('notes:remove', async ({ scope, file }) => notes.remove(notesDir(scope), file));
@@ -109,45 +126,96 @@ function register({ handle, send, cfg, findCourse, getSession, closeSession, isS
         if (r.pdf) r.pdfUrl = pathToFileURL(path.join(dir, r.pdf)).href + '?t=' + Date.now();
         return r;
     });
-    handle('notes:exportPdf', async ({ html, out }) => {
-        // Markdown → PDF via an offscreen window (uses the same KaTeX CSS)
+    async function mdToPdf(html, out) {
+        // Markdown → PDF via an offscreen window (same KaTeX CSS as the preview)
         const { BrowserWindow } = require('electron');
         const w = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
         const css = fs.readFileSync(path.join(__dirname, 'renderer', 'vendor', 'katex.min.css'), 'utf8').replace(/url\(fonts\//g, `url(${pathToFileURL(path.join(__dirname, 'renderer', 'vendor', 'fonts')).href}/`);
-        const page = `<!doctype html><meta charset="utf-8"><style>${css} body{font:11pt/1.55 -apple-system,"Segoe UI",sans-serif;max-width:720px;margin:24px auto;color:#111} pre,code{font-family:Menlo,monospace;font-size:.9em} pre{background:#f4f4f4;padding:10px;border-radius:6px} img{max-width:100%}</style>${html}`;
+        const page = `<!doctype html><meta charset="utf-8"><style>${css} body{font:11pt/1.55 -apple-system,"Segoe UI",sans-serif;max-width:720px;margin:24px auto;color:#111} pre,code{font-family:Menlo,monospace;font-size:.9em} pre{background:#f4f4f4;padding:10px;border-radius:6px} img{max-width:100%} blockquote{border-left:3px solid #ddd;margin:0;padding-left:12px;color:#555}</style>${html}`;
         const tmp = path.join(os.tmpdir(), `polirec-${Date.now()}.html`);
         fs.writeFileSync(tmp, page);
         await w.loadFile(tmp);
         const pdf = await w.webContents.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'default' } });
         fs.writeFileSync(out, pdf); w.destroy(); fs.unlinkSync(tmp);
-        shell.showItemInFolder(out);
         return out;
+    }
+    handle('notes:exportPdf', async ({ html, out }) => { await mdToPdf(html, out); shell.showItemInFolder(out); return out; });
+
+    /** Send a note to another app: notion | applenotes | goodnotes | notability | obsidian | pdf */
+    handle('notes:exportTo', async ({ scope, file, target, html }) => {
+        const dir = notesDir(scope), abs = path.join(dir, file);
+        const kind = notes.KIND_BY_EXT[path.extname(file)];
+        const title = path.basename(file).replace(/\.(md|tex|typ)$/, '');
+        const content = fs.readFileSync(abs, 'utf8');
+        const pdfPath = async () => {
+            if (kind === 'markdown') return mdToPdf(html, abs.replace(/\.md$/, '.pdf'));
+            const r = await notes.compile(dir, file);
+            if (!r.ok) throw new Error('Compilazione non riuscita: correggi gli errori prima di esportare');
+            return path.join(dir, r.pdf);
+        };
+        const en = cfg().settings.integrations || {};
+        if (target !== 'pdf' && !en[target]) throw new Error('Integrazione non attiva: attivala in Impostazioni → Integrazioni');
+        if (target === 'notion') { const s = cfg().settings.integrations; return { url: await integ.exportToNotion({ token: s.notionToken, parent: s.notionParent, title, markdown: content, kind }) }; }
+        if (target === 'applenotes') { await integ.exportToAppleNotes(title, html || `<pre>${content.replace(/</g, '&lt;')}</pre>`); return { ok: true }; }
+        if (target === 'goodnotes' || target === 'notability') { const p = await pdfPath(); return { app: await integ.openPdfIn(target, p), pdf: p }; }
+        if (target === 'pdf') { const p = await pdfPath(); shell.showItemInFolder(p); return { pdf: p }; }
+        if (target === 'obsidian') {
+            const vault = integ.obsidianVault(abs);
+            if (!vault) return { needVault: true, dir };
+            await shell.openExternal(integ.obsidianUrl(abs)); return { ok: true, vault };
+        }
+        throw new Error('destinazione sconosciuta');
+    });
+    handle('integrations:apps', async () => integ.installedApps());
+    handle('integrations:testNotion', async ({ token, parent }) => integ.testNotion(token, parent));
+
+    // ── cloud sync (iCloud / Google Drive / any folder) ──
+    handle('cloud:detect', async () => cloud.detect());
+    handle('cloud:set', async ({ enabled, provider, path: p }) => {
+        const c = cfg();
+        c.settings.cloud = { ...c.settings.cloud, enabled: !!enabled, provider: provider || '', path: p || '' };
+        let copied = 0, pulled = null;
+        if (enabled) {
+            pulled = cloud.importConfig(c);            // another computer may already have synced
+            copied = cloud.migrateToCloud(c, msg => send({ type: 'log', msg }));
+        }
+        lib.saveConfig(c);                             // also writes polirec-sync.json
+        return { copied, pulled, root: cloud.root(c.settings) };
+    });
+    handle('cloud:pull', async () => {
+        const c = cfg();
+        const r = cloud.importConfig(c);
+        if (r.changed) lib.saveConfig(c, { noExport: true });
+        return r;
     });
 
-    // AI side panel: edit/explain/continue the current document
-    handle('ai:assist', async ({ instruction, document, selection, kind, courseId, provider }) => {
+    // AI chat for a note. Edits come back as a full revised document → shown inline as accept/reject changes.
+    handle('ai:assist', async ({ instruction, document, selection, kind, courseId, history = [] }) => {
         const s = cfg().settings.ai;
-        const prov = provider || s.provider;
-        const lang = { markdown: 'Markdown (con formule LaTeX tra $…$)', latex: 'LaTeX', typst: 'Typst' }[kind] || 'Markdown';
-        let context = '';
-        if (courseId) {
-            const c = findCourse(courseId);
-            context = `Il documento sono appunti del corso universitario "${c.name || c.input}".\n`;
-        }
-        const prompt = `Sei un assistente per prendere appunti universitari dentro un editor ${lang}.\n${context}` +
-            `Richiesta dell'utente: ${instruction}\n\n` +
-            (selection ? `Lavora sulla PORZIONE SELEZIONATA (sotto <selezione>), usando il resto del documento come contesto.\n` : `Lavora sul documento.\n`) +
-            `Regole di risposta:\n- se la richiesta AGGIUNGE contenuto (esempi, paragrafi, esercizi, continuazione): rispondi SOLO con il nuovo testo da aggiungere, senza ripetere il documento;\n` +
-            `- se MODIFICA testo esistente (migliora, correggi, riformula, traduci): rispondi SOLO con la versione modificata ${selection ? 'della selezione' : 'dell\'intero documento'};\n` +
-            `- se è una DOMANDA o una spiegazione: rispondi in modo conciso in italiano.\n` +
-            `Usa la sintassi ${lang}. Niente premesse, niente blocchi \`\`\`.`;
+        const prov = pickProvider(cfg().settings);
+        const lang = { markdown: 'Markdown (formule LaTeX tra $…$)', latex: 'LaTeX', typst: 'Typst' }[kind] || 'Markdown';
+        const courseCtx = courseId ? `Gli appunti sono del corso universitario "${(findCourse(courseId) || {}).name || ''}".\n` : '';
+        const hist = history.slice(-6).map(h => `Studente: ${h.q}\nAssistente: ${h.a}`).join('\n\n');
+        const prompt = `Sei l'assistente di scrittura di un editor di appunti universitari in ${lang}. ${courseCtx}` +
+            `Hai il documento completo${selection ? ' e la porzione selezionata dallo studente' : ''}.\n` +
+            `Se la richiesta comporta MODIFICARE o AGGIUNGERE testo nel documento, rispondi ESATTAMENTE in questo formato:\n` +
+            `@@NOTA@@ una frase che riassume le modifiche\n@@DOCUMENTO@@\n<il documento COMPLETO aggiornato, in ${lang}>\n` +
+            (selection ? `Modifica solo la parte selezionata (e ciò che serve per coerenza), lascia il resto identico.\n` : `Lascia identiche le parti che non devi cambiare.\n`) +
+            `Se invece è una DOMANDA o una richiesta di spiegazione, rispondi normalmente in italiano, in Markdown, in modo conciso.\n` +
+            (hist ? `\nConversazione precedente:\n${hist}\n` : '') + `\nRichiesta: ${instruction}`;
         const input = `<documento>\n${document}\n</documento>` + (selection ? `\n<selezione>\n${selection}\n</selezione>` : '');
         const jobId = crypto.randomUUID();
         send({ type: 'ai-start', jobId, provider: prov, assist: true });
         try {
             const out = await ai.runPrompt(prov, prompt, input, { model: s.model, cwd: os.tmpdir(), onChunk: ch => send({ type: 'ai-chunk', jobId, chunk: ch }) });
             send({ type: 'ai-done', jobId, assist: true });
-            return out.replace(/^```\w*\n([\s\S]*?)\n```\s*$/m, '$1').trim();
+            const m = out.match(/@@DOCUMENTO@@\s*\n([\s\S]*)$/);
+            if (m) {
+                const note = (out.match(/@@NOTA@@\s*(.*)/) || [])[1] || 'Modifiche proposte';
+                const doc = m[1].replace(/^```\w*\n([\s\S]*?)\n```\s*$/, '$1').replace(/\s+$/, '') + '\n';
+                return { mode: 'edit', note: note.trim(), document: doc };
+            }
+            return { mode: 'answer', text: out.trim() };
         } catch (e) { send({ type: 'ai-error', jobId, error: e.message }); throw e; }
     });
 
@@ -208,4 +276,4 @@ function register({ handle, send, cfg, findCourse, getSession, closeSession, isS
     });
 }
 
-module.exports = { register, hardware };
+module.exports = { register, hardware, pickProvider };

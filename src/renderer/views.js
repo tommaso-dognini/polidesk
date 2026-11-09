@@ -93,48 +93,87 @@ setInterval(() => { if (Pomo.st.running) { if (Pomo.remaining() <= 0) Pomo.finis
 window.Pomo = Pomo;
 
 // ═════════════ APPUNTI (editor) ═════════════
-const Notes = { scope: null, file: null, kind: null, editor: null, dirty: false, saveT: null, preview: true, aiOpen: true, rec: null, dir: '' };
+const Notes = { scope: null, file: null, kind: null, editor: null, dirty: false, saveT: null, aiOpen: true, dir: '', open: {} };
 const KIND_LABEL = { markdown: 'Markdown', latex: 'LaTeX', typst: 'Typst' };
+const KIND_SHORT = { markdown: 'MD', latex: 'TeX', typst: 'Typ' };
+const KIND_INFO = {
+    markdown: ['Markdown', 'Appunti veloci in stile Obsidian/Notion: titoli, liste, checklist, formule $…$, immagini incollate.'],
+    latex: ['LaTeX', 'Documenti matematici completi. Si compila in PDF con il motore incluso (Tectonic).'],
+    typst: ['Typst', 'Come LaTeX ma più semplice e istantaneo. Ottimo per formule e appunti impaginati.'],
+};
+// view mode per format: write | split | read
+const viewMode = kind => { try { return localStorage.getItem('nview:' + kind) || 'split'; } catch (e) { return 'split'; } };
+const setViewMode = (kind, m) => { try { localStorage.setItem('nview:' + kind, m); } catch (e) { } };
 
 window.extraViews.notes = async v => {
-    const scopes = await api.notes.scopes();
     if (route.scope !== undefined) Notes.scope = route.scope;
-    const mode = S.settings.editor.mode || 'markdown';
     v.innerHTML = `<div class="notes-layout">
         <aside class="notes-side">
-            <div class="row" style="padding:12px 12px 6px"><select id="n-scope">${scopes.map(s => `<option value="${s.id || ''}" ${String(Notes.scope || '') === String(s.id || '') ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
-            <div class="row" style="padding:0 12px 8px"><button class="primary small" id="n-new">＋ Nuovo ${KIND_LABEL[mode]}</button><span class="grow"></span><button class="ghost small" id="n-newmenu" title="Altro tipo">▾</button><button class="ghost small" id="n-folder" title="Apri cartella">⌂</button></div>
-            <input id="n-filter" placeholder="Cerca…" style="margin:0 12px 8px;width:calc(100% - 24px)">
-            <div id="n-files" class="n-files"></div>
+            <div class="ns-head"><b>Appunti</b><span class="grow"></span><button class="primary small" id="n-new" title="Nuovo appunto (⌘N)">＋ Nuovo</button></div>
+            <div class="ns-search"><input id="n-filter" placeholder="Cerca negli appunti…"></div>
+            <div id="n-tree" class="n-tree"></div>
+            <div class="ns-foot"><button class="ghost small" id="n-folder">⌂ Apri cartella</button><span class="faint" id="n-cloud"></span></div>
         </aside>
-        <section class="notes-main" id="n-main"><div class="empty-state"><h2>Appunti</h2><p>Crea un appunto in Markdown, LaTeX o Typst.<br>Il formato predefinito si sceglie in Impostazioni → Appunti.</p></div></section>
+        <section class="notes-main" id="n-main"></section>
     </div>`;
+    const scopes = await api.notes.scopes();
+    const cloudOn = S.settings.cloud && S.settings.cloud.enabled;
+    $('#n-cloud').textContent = cloudOn ? '☁ sincronizzati' : '';
+    const lists = {};
     const loadFiles = async () => {
-        Notes.dir = await api.notes.dir(Notes.scope);
-        const files = await api.notes.list(Notes.scope);
-        const q = ($('#n-filter') && $('#n-filter').value.toLowerCase()) || '';
-        $('#n-files').innerHTML = files.filter(f => !q || f.file.toLowerCase().includes(q)).map(f => `<div class="n-file ${Notes.file === f.file ? 'on' : ''}" data-f="${esc(f.file)}" data-k="${f.kind}">
-            <span class="badge-k ${f.kind}">${{ markdown: 'MD', latex: 'TeX', typst: 'Typ' }[f.kind]}</span><span class="n">${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</span><span class="faint">${new Date(f.mtime).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span></div>`).join('')
-            || '<div class="faint" style="padding:10px 14px">Nessun appunto</div>';
-        $$('.n-file').forEach(x => x.onclick = () => openNote(x.dataset.f, x.dataset.k));
+        await Promise.all(scopes.map(async s => { lists[s.id || ''] = await api.notes.list(s.id); }));
+        const q = ($('#n-filter').value || '').toLowerCase();
+        $('#n-tree').innerHTML = scopes.map(s => {
+            const key = s.id || '';
+            const files = (lists[key] || []).filter(f => !q || f.file.toLowerCase().includes(q));
+            if (q && !files.length) return '';
+            const open = Notes.open[key] ?? (key === String(Notes.scope || '') || files.length > 0);
+            return `<div class="n-group ${open ? 'open' : ''}" data-s="${esc(key)}">
+                <div class="n-gh"><span class="chev">▸</span><span class="n">${esc(s.name)}</span><span class="faint">${files.length || ''}</span><button class="icon ghost small n-add" title="Nuovo appunto in ${esc(s.name)}">＋</button></div>
+                <div class="n-gb">${files.map(f => `<div class="n-file ${Notes.file === f.file && String(Notes.scope || '') === key ? 'on' : ''}" data-f="${esc(f.file)}" data-k="${f.kind}">
+                    <span class="badge-k ${f.kind}">${KIND_SHORT[f.kind]}</span><span class="n">${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</span><span class="faint">${new Date(f.mtime).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span></div>`).join('') || '<div class="faint n-empty">vuoto</div>'}</div></div>`;
+        }).join('');
+        $$('.n-group').forEach(g => {
+            const key = g.dataset.s;
+            $('.n-gh', g).onclick = e => { if (e.target.closest('.n-add')) return; Notes.open[key] = !g.classList.contains('open'); g.classList.toggle('open'); };
+            $('.n-add', g).onclick = () => create(key || null);
+            $$('.n-file', g).forEach(x => x.onclick = () => openNote(x.dataset.f, x.dataset.k, key || null));
+        });
     };
     Notes.reload = loadFiles;
-    $('#n-scope').onchange = e => { Notes.scope = e.target.value || null; Notes.file = null; loadFiles(); $('#n-main').innerHTML = ''; };
-    $('#n-filter').oninput = loadFiles;
-    $('#n-folder').onclick = () => guard(() => api.openPath(Notes.dir));
-    const create = kind => guard(async () => {
-        const r = await askNewNote(kind);
+    const create = (scope = Notes.scope) => guard(async () => {
+        const r = await askNewNote(S.settings.editor.mode || 'markdown');
         if (!r) return;
-        const f = await api.notes.create(Notes.scope, r.title, r.kind);
-        await loadFiles(); openNote(f, r.kind);
+        const f = await api.notes.create(scope, r.title, r.kind);
+        Notes.open[scope || ''] = true;
+        await loadFiles(); openNote(f, r.kind, scope);
     });
-    $('#n-new').onclick = () => create(mode);
-    $('#n-newmenu').onclick = e => showMenu(e.clientX, e.clientY + 10, Object.entries(KIND_LABEL).map(([k, l]) => [`Nuovo ${l}`, () => create(k)]));
+    Notes.create = create;
+    $('#n-new').onclick = () => create(Notes.scope);
+    $('#n-filter').oninput = loadFiles;
+    $('#n-folder').onclick = () => guard(async () => api.openPath(await api.notes.dir(Notes.scope)));
     await loadFiles();
-    if (route.file) openNote(route.file, route.kind || 'markdown');
+    if (route.file) openNote(route.file, route.kind || 'markdown', Notes.scope);
+    else if (Notes.file && Notes.editor === null) welcome();
+    else welcome();
 };
 
+function welcome() {
+    const m = $('#n-main'); if (!m) return;
+    const scopeName = Notes.scope && course(Notes.scope) ? cname(course(Notes.scope)) : 'Generale';
+    m.innerHTML = `<div class="n-welcome"><h1>Nuovo appunto</h1><p class="muted">In <b>${esc(scopeName)}</b> · scegli il formato (il predefinito si cambia in Impostazioni → Appunti)</p>
+        <div class="kind-cards">${Object.entries(KIND_INFO).map(([k, [t, d]]) => `<button class="kind-card ${k === (S.settings.editor.mode || 'markdown') ? 'def' : ''}" data-k="${k}"><span class="badge-k ${k}">${KIND_SHORT[k]}</span><b>${t}</b><span>${d}</span></button>`).join('')}</div>
+        <p class="faint">Suggerimenti: <b>⌘S</b> salva (comunque salvo da solo) · <b>⌘↵</b> compila LaTeX/Typst · seleziona del testo e usa <b>✨ AI</b> · <b>🎙 Detta</b> trascrive la tua voce in locale.</p></div>`;
+    $$('.kind-card', m).forEach(b => b.onclick = () => guard(async () => {
+        const title = await askText(`Nuovo appunto ${KIND_LABEL[b.dataset.k]}`, { placeholder: 'Titolo', ok: 'Crea' });
+        if (title === null) return;
+        const f = await api.notes.create(Notes.scope, title.trim() || 'Senza titolo', b.dataset.k);
+        await Notes.reload(); openNote(f, b.dataset.k, Notes.scope);
+    }));
+}
+
 async function flush() {
+    if (Notes.editor && Notes.editor.isReviewing()) Notes.editor.rejectAll();   // leaving with pending AI suggestions: keep the original
     if (!Notes.editor || !Notes.dirty) return;
     clearTimeout(Notes.saveT);
     await api.notes.write(Notes.scope, Notes.file, Notes.editor.getValue());
@@ -142,40 +181,45 @@ async function flush() {
 }
 window.flushNote = flush;
 
-async function openNote(file, kind) {
+async function openNote(file, kind, scope = Notes.scope) {
     await flush();
     if (Notes.editor) { Notes.editor.destroy(); Notes.editor = null; }
-    Notes.file = file; Notes.kind = kind;
-    $$('.n-file').forEach(x => x.classList.toggle('on', x.dataset.f === file));
-    const content = await api.notes.read(Notes.scope, file);
+    Notes.scope = scope; Notes.file = file; Notes.kind = kind;
+    Notes.dir = await api.notes.dir(scope);
+    $$('.n-file').forEach(x => x.classList.toggle('on', x.dataset.f === file && x.closest('.n-group').dataset.s === String(scope || '')));
+    const content = await api.notes.read(scope, file);
     const compiled = kind !== 'markdown';
     const engines = compiled ? await api.notes.engines() : {};
     const engineOk = kind === 'typst' ? engines.typst : kind === 'latex' ? engines.tectonic : true;
+    const mode = viewMode(kind);
+    const scopeName = scope && course(scope) ? cname(course(scope)) : 'Generale';
     const m = $('#n-main');
-    m.innerHTML = `<div class="ed-toolbar">
-            <span class="badge-k ${kind}">${KIND_LABEL[kind]}</span><b class="ed-title" id="ed-title" title="Rinomina">${esc(file.replace(/\.(md|tex|typ)$/, ''))}</b><span class="faint" id="ed-saved">Salvato</span><span class="grow"></span>
-            ${kind === 'markdown' ? '<button class="small ghost" data-w="**,**" title="Grassetto">B</button><button class="small ghost" data-w="*,*" title="Corsivo"><i>I</i></button><button class="small ghost" data-w="$,$" title="Formula">∑</button><button class="small ghost" data-w="- [ ] ," title="Checklist">☑</button>' : ''}
-            <button class="small ghost" id="ed-dict" title="Dettatura (Whisper locale)">🎙</button>
-            ${compiled ? `<button class="small primary" id="ed-compile" title="Compila (⌘↵)">▶ Compila</button>` : '<button class="small ghost" id="ed-pdf">Esporta PDF</button>'}
-            <button class="small ghost ${Notes.preview ? 'on' : ''}" id="ed-prev" title="Anteprima">◫</button>
-            <button class="small ghost ${Notes.aiOpen ? 'on' : ''}" id="ed-ai" title="Pannello AI">✨</button>
-            <button class="small ghost" id="ed-more">⋯</button>
-        </div>
-        ${compiled && !engineOk ? `<div class="banner" style="margin:10px 14px">Il motore ${kind === 'typst' ? 'Typst' : 'LaTeX (Tectonic)'} non è ancora installato. <button class="small primary" id="ed-install">Installa (${kind === 'typst' ? '~30 MB' : '~15 MB + pacchetti al primo uso'})</button></div>` : ''}
-        <div class="ed-body ${Notes.preview ? 'with-prev' : ''} ${Notes.aiOpen ? 'with-ai' : ''}">
+    m.innerHTML = `<header class="ed-head">
+            <div class="ed-titlebox"><input class="ed-title" id="ed-title" value="${esc(file.replace(/\.(md|tex|typ)$/, '').split('/').pop())}" spellcheck="false">
+                <div class="ed-meta"><span class="badge-k ${kind}">${KIND_LABEL[kind]}</span><span>${esc(scopeName)}</span><span id="ed-saved">Salvato</span></div></div>
+            <div class="ed-actions">
+                <div class="seg" id="ed-mode">${[['write', 'Scrivi'], ['split', 'Dividi'], ['read', compiled ? 'PDF' : 'Leggi']].map(([k, l]) => `<button data-m="${k}" class="${mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+                ${compiled ? '<button class="primary" id="ed-compile" title="⌘↵">▶ Compila</button>' : ''}
+                <button id="ed-dict" title="Dettatura: parla, la voce viene trascritta in locale">🎙 Detta</button>
+                <button id="ed-ai" class="${Notes.aiOpen ? 'on' : ''}" title="Assistente AI">✨ AI</button>
+                <button id="ed-export">Esporta ▾</button>
+                <button class="ghost icon" id="ed-more" title="Altro">⋯</button>
+            </div>
+        </header>
+        ${compiled && !engineOk ? `<div class="banner ed-banner">Per compilare serve il motore ${kind === 'typst' ? 'Typst' : 'LaTeX (Tectonic)'}. <button class="small primary" id="ed-install">Installa ora</button> <span class="faint">${kind === 'typst' ? '~30 MB' : '~15 MB + pacchetti al primo uso'}</span></div>` : ''}
+        <div class="ed-body mode-${mode} ${Notes.aiOpen ? 'with-ai' : ''}">
             <div class="ed-src" id="ed-src"></div>
-            <div class="ed-prev" id="ed-prevpane">${compiled ? '<div class="empty-state">Premi <b>Compila</b> per vedere il PDF</div>' : ''}</div>
+            <div class="ed-prev" id="ed-prevpane">${compiled ? '<div class="empty-state">Premi <b>▶ Compila</b> (⌘↵) per vedere il PDF</div>' : ''}</div>
             <div class="ed-ai" id="ed-aipane"></div>
         </div>
         <pre class="ed-log hidden" id="ed-log"></pre>`;
     const onChange = () => {
         Notes.dirty = true; $('#ed-saved').textContent = 'Modificato…';
         clearTimeout(Notes.saveT); Notes.saveT = setTimeout(flush, 800);
-        if (kind === 'markdown' && Notes.preview) renderPreview();
+        if (kind === 'markdown' && viewMode(kind) !== 'write') renderPreview();
     };
-    Notes.editor = PoliEditor.create($('#ed-src'), { kind, value: content, onChange, onSave: () => { flush(); if (compiled) compileNote(); } });
+    Notes.editor = PoliEditor.create($('#ed-src'), { kind, value: content, onChange, onSave: () => { flush(); if (compiled) compileNote(); }, onReviewChange: reviewBar, lineNumbers: compiled });
     Notes.editor.view.dom.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && compiled) { e.preventDefault(); compileNote(); } });
-    // paste images → assets/
     Notes.editor.view.dom.addEventListener('paste', e => {
         const item = [...(e.clipboardData || {}).items || []].find(i => i.type.startsWith('image/'));
         if (!item) return;
@@ -186,21 +230,35 @@ async function openNote(file, kind) {
             Notes.editor.insertAtCursor(kind === 'markdown' ? `![](${rel})` : kind === 'typst' ? `#image("${rel}", width: 80%)` : `\\includegraphics[width=0.8\\linewidth]{${rel}}`);
         }));
     });
-    $$('[data-w]', m).forEach(b => b.onclick = () => { const [a, z] = b.dataset.w.split(','); Notes.editor.wrapSelection(a, z); });
-    $('#ed-prev').onclick = () => { Notes.preview = !Notes.preview; openNote(file, kind); };
-    $('#ed-ai').onclick = () => { Notes.aiOpen = !Notes.aiOpen; $('.ed-body').classList.toggle('with-ai', Notes.aiOpen); $('#ed-ai').classList.toggle('on', Notes.aiOpen); };
-    $('#ed-title').onclick = async () => { const n = await askText('Rinomina appunto', { value: file.replace(/\.(md|tex|typ)$/, '').split('/').pop(), ok: 'Rinomina' }); if (n && n.trim()) guard(async () => { await flush(); const nf = await api.notes.rename(Notes.scope, file, n); await Notes.reload(); openNote(nf, kind); }); };
-    $('#ed-more').onclick = e => showMenu(e.clientX - 180, e.clientY + 10, [
+    // inline rename
+    const t = $('#ed-title');
+    const doRename = () => guard(async () => {
+        const n = t.value.trim(), old = file.replace(/\.(md|tex|typ)$/, '').split('/').pop();
+        if (!n || n === old) { t.value = old; return; }
+        await flush(); const nf = await api.notes.rename(Notes.scope, file, n); await Notes.reload(); openNote(nf, kind, Notes.scope);
+    });
+    t.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); t.blur(); } if (e.key === 'Escape') { t.value = file.replace(/\.(md|tex|typ)$/, '').split('/').pop(); t.blur(); } };
+    t.onblur = doRename;
+    $$('#ed-mode button').forEach(b => b.onclick = () => {
+        setViewMode(kind, b.dataset.m);
+        $$('#ed-mode button').forEach(x => x.classList.toggle('on', x === b));
+        const body = $('.ed-body'); body.classList.remove('mode-write', 'mode-split', 'mode-read'); body.classList.add('mode-' + b.dataset.m);
+        if (kind === 'markdown' && b.dataset.m !== 'write') renderPreview();
+        if (b.dataset.m === 'write') Notes.editor.focus();
+    });
+    $('#ed-ai').onclick = () => { Notes.aiOpen = !Notes.aiOpen; $('.ed-body').classList.toggle('with-ai', Notes.aiOpen); $('#ed-ai').classList.toggle('on', Notes.aiOpen); if (Notes.aiOpen) $('#ai-q') && $('#ai-q').focus(); };
+    $('#ed-export').onclick = e => exportMenu(e);
+    $('#ed-more').onclick = e => showMenu(e.clientX - 200, e.clientY + 10, [
         ['📁 Mostra nella cartella', () => api.reveal(Notes.dir + '/' + file)],
         ['↗ Apri con app di sistema', () => api.openPath(Notes.dir + '/' + file)],
-        ['🗑 Sposta nel cestino', async () => { if (!confirm('Spostare l\'appunto nel cestino (.cestino nella cartella)?')) return; await api.notes.remove(Notes.scope, file); Notes.file = null; Notes.editor.destroy(); Notes.editor = null; $('#n-main').innerHTML = ''; Notes.reload(); }],
+        '-',
+        ['🗑 Sposta nel cestino', async () => { if (!confirm('Spostare l\'appunto nel cestino (.cestino nella cartella)?')) return; await api.notes.remove(Notes.scope, file); Notes.file = null; Notes.editor.destroy(); Notes.editor = null; await Notes.reload(); welcome(); }],
     ]);
-    if ($('#ed-install')) $('#ed-install').onclick = () => guard(async () => { $('#ed-install').disabled = true; $('#ed-install').textContent = 'Installo…'; await api.notes.installEngine(kind === 'typst' ? 'typst' : 'tectonic'); toast('Motore installato'); openNote(file, kind); });
+    if ($('#ed-install')) $('#ed-install').onclick = () => guard(async () => { $('#ed-install').disabled = true; $('#ed-install').textContent = 'Installo…'; await api.notes.installEngine(kind === 'typst' ? 'typst' : 'tectonic'); toast('Motore installato'); openNote(file, kind, Notes.scope); });
     if ($('#ed-compile')) $('#ed-compile').onclick = compileNote;
-    if ($('#ed-pdf')) $('#ed-pdf').onclick = () => guard(async () => { await flush(); const out = (Notes.dir + '/' + file).replace(/\.md$/, '.pdf'); await api.notes.exportPdf(PoliEditor.renderMarkdown(Notes.editor.getValue(), { baseUrl: 'file://' + encodeURI(Notes.dir + '/' + file.split('/').slice(0, -1).join('/') + (file.includes('/') ? '/' : '')) }), out); toast('PDF esportato'); });
     $('#ed-dict').onclick = toggleDictation;
-    if (kind === 'markdown' && Notes.preview) renderPreview();
-    else if (compiled && Notes.preview && engineOk) {
+    if (kind === 'markdown') renderPreview();
+    else if (engineOk) {
         const pdf = (await api.notes.list(Notes.scope)).find(f => f.file === file);
         if (pdf && pdf.pdf) showPdf('file://' + encodeURI(Notes.dir + '/' + pdf.pdf) + '?t=' + Date.now());
     }
@@ -208,11 +266,32 @@ async function openNote(file, kind) {
     Notes.editor.focus();
 }
 
-function renderPreview() {
-    const base = 'file://' + encodeURI(Notes.dir + '/' + (Notes.file.includes('/') ? Notes.file.split('/').slice(0, -1).join('/') + '/' : ''));
-    $('#ed-prevpane').innerHTML = `<div class="md md-doc">${PoliEditor.renderMarkdown(Notes.editor.getValue(), { baseUrl: base })}</div>`;
+async function exportMenu(e) {
+    const apps = await api.integrations.apps().catch(() => ({}));
+    const it = S.settings.integrations || {};
+    const run = (target, label) => guard(async () => {
+        await flush();
+        toast(`Esporto in ${label}…`, 2500);
+        const html = Notes.kind === 'markdown' ? PoliEditor.renderMarkdown(Notes.editor.getValue(), { baseUrl: 'file://' + encodeURI(Notes.dir + '/' + (Notes.file.includes('/') ? Notes.file.split('/').slice(0, -1).join('/') + '/' : '')) }) : null;
+        const r = await api.exportNote(Notes.scope, Notes.file, target, html);
+        if (r.needVault) { if (confirm('Questa cartella non è un vault di Obsidian. In Obsidian scegli «Apri cartella come vault» e seleziona la cartella degli appunti. Mostrarla ora?')) api.openPath(r.dir); return; }
+        if (r.url) { toast('Pagina creata su Notion ✓'); api.openExternal(r.url); }
+        else if (r.app) toast(`Aperto in ${r.app} ✓`);
+        else toast('Fatto ✓');
+    });
+    const items = [['📄 PDF', () => run('pdf', 'PDF')]];
+    const en = [['notion', 'Notion'], ['applenotes', 'Note di Apple'], ['goodnotes', 'Goodnotes (PDF)'], ['notability', 'Notability (PDF)'], ['obsidian', 'Apri in Obsidian']].filter(([k]) => it[k]);
+    if (en.length) items.push('-', ...en.map(([k, l]) => [l, () => (k === 'notion' && !it.notionToken) ? go({ name: 'settings' }) : run(k, l.replace(/ \(PDF\)|Apri in /g, ''))]));
+    items.push('-', ['⚙ Altre app… (Impostazioni → Integrazioni)', () => go({ name: 'settings' })]);
+    showMenu(e.clientX - 160, e.clientY + 10, items);
 }
-function showPdf(url) { $('#ed-prevpane').innerHTML = `<iframe src="${url}#toolbar=1&view=FitH" class="pdf-frame"></iframe>`; }
+
+function renderPreview() {
+    const p = $('#ed-prevpane'); if (!p || !Notes.editor) return;
+    const base = 'file://' + encodeURI(Notes.dir + '/' + (Notes.file.includes('/') ? Notes.file.split('/').slice(0, -1).join('/') + '/' : ''));
+    p.innerHTML = `<article class="md md-doc">${PoliEditor.renderMarkdown(Notes.editor.getValue(), { baseUrl: base })}</article>`;
+}
+function showPdf(url) { const p = $('#ed-prevpane'); if (p) p.innerHTML = `<iframe src="${url}#toolbar=1&view=FitH" class="pdf-frame"></iframe>`; }
 
 async function compileNote() {
     await flush();
@@ -221,59 +300,87 @@ async function compileNote() {
     const logEl = $('#ed-log');
     try {
         const r = await api.notes.compile(Notes.scope, Notes.file);
-        if (r.pdfUrl && Notes.preview) showPdf(r.pdfUrl);
+        if (r.pdfUrl) { showPdf(r.pdfUrl); if (viewMode(Notes.kind) === 'write') $('#ed-mode [data-m="split"]').click(); }
         logEl.classList.toggle('hidden', r.ok);
         logEl.textContent = r.ok ? '' : (r.errors.length ? r.errors.map(e => `riga ${e.line}${e.col ? ':' + e.col : ''} — ${e.msg}`).join('\n') : r.log.slice(-2000));
         if (!r.ok && r.errors[0]) Notes.editor.gotoLine(r.errors[0].line);
         if (r.ok) toast('Compilato ✓', 1500);
     } catch (e) {
-        if (/non installato/.test(e.message)) openNote(Notes.file, Notes.kind); else toast('Errore: ' + e.message, 6000);
+        if (/non installato/.test(e.message)) openNote(Notes.file, Notes.kind, Notes.scope); else toast('Errore: ' + e.message, 6000);
     } finally { b.disabled = false; b.textContent = '▶ Compila'; }
 }
 
-// ── AI side panel ──
+document.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n' && route.name === 'notes' && Notes.create) { e.preventDefault(); Notes.create(Notes.scope); } });
+
+// ── AI chat panel: answers in the chat, edits applied inline as reviewable changes ──
 const AI_ACTIONS = [
-    ['Migliora', 'Migliora chiarezza e struttura, correggi errori, mantieni il contenuto'],
-    ['Continua', 'Continua a scrivere il testo in modo coerente (solo la continuazione)'],
-    ['Spiega', 'Spiegami in modo semplice il contenuto selezionato'],
-    ['Riassumi', 'Riassumi in punti chiave'],
-    ['Formule', 'Riscrivi le formule in notazione corretta per questo formato'],
-    ['Esercizio', 'Crea un esercizio con soluzione su questo argomento'],
+    ['✍️ Migliora', 'Migliora chiarezza, struttura e correttezza, senza cambiare il contenuto'],
+    ['➕ Continua', 'Continua a scrivere il documento in modo coerente'],
+    ['🧮 Formule', 'Correggi e uniforma tutte le formule matematiche'],
+    ['🗂 Struttura', 'Riorganizza in sezioni con titoli chiari e punti elenco'],
+    ['📝 Esempio', 'Aggiungi un esempio svolto dove è più utile'],
+    ['❓ Spiega', 'Spiegami in modo semplice il contenuto (domanda, non modificare)'],
 ];
+const chatHistory = {};   // per file: [{q, a, kind}]
 function drawAiPanel() {
     const p = $('#ed-aipane'); if (!p) return;
     const prov = (S.tools.ai[S.settings.ai.provider] || {}).label || 'AI';
-    p.innerHTML = `<div class="ai-head"><b>✨ Assistente</b><span class="faint">${esc(prov)}</span></div>
+    const hist = chatHistory[Notes.scope + ':' + Notes.file] || [];
+    p.innerHTML = `<div class="ai-head"><b>✨ Assistente</b><span class="faint">${esc(prov)}</span><span class="grow"></span><button class="ghost small icon" id="ai-clear" title="Nuova conversazione">⟲</button></div>
+        <div class="ai-log" id="ai-log">${hist.length ? '' : `<div class="ai-hint"><b>Come funziona</b><br>Chiedi una modifica («aggiungi un esempio», «traduci in inglese», «trasforma in tabella») e la vedrai <b>direttamente nel documento</b>: accetta o rifiuta ogni cambiamento. Seleziona del testo per lavorare solo su quella parte. Le domande ricevono risposta qui.</div>`}</div>
         <div class="ai-chips">${AI_ACTIONS.map((a, i) => `<button class="small" data-a="${i}" title="${esc(a[1])}">${a[0]}</button>`).join('')}</div>
-        <div class="ai-log" id="ai-log"><p class="faint">Seleziona del testo (opzionale) e chiedi qualcosa. Le risposte si possono inserire o sostituire nel documento.</p></div>
-        <div class="ai-input"><textarea id="ai-q" rows="3" placeholder="Es. trasforma in tabella, aggiungi un esempio, traduci in inglese… (⌘↵)"></textarea><button class="primary small" id="ai-send">Invia</button></div>`;
+        <div class="ai-input"><textarea id="ai-q" rows="2" placeholder="Chiedi o descrivi una modifica… (↵ invia, ⇧↵ a capo)"></textarea><button class="primary small" id="ai-send">↑</button></div>`;
+    for (const h of hist) addChat(h.q, h.a, h.kind);
     $$('[data-a]', p).forEach(b => b.onclick = () => askAi(AI_ACTIONS[+b.dataset.a][1]));
     $('#ai-send').onclick = () => { const q = $('#ai-q').value.trim(); if (q) { askAi(q); $('#ai-q').value = ''; } };
-    $('#ai-q').onkeydown = e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') $('#ai-send').click(); };
+    $('#ai-q').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#ai-send').click(); } };
+    $('#ai-clear').onclick = () => { delete chatHistory[Notes.scope + ':' + Notes.file]; drawAiPanel(); };
+}
+function addChat(q, a, kind) {
+    const log = $('#ai-log'); if (!log) return null;
+    const hint = $('.ai-hint', log); if (hint) hint.remove();
+    const item = document.createElement('div'); item.className = 'ai-item';
+    item.innerHTML = `<div class="ai-q">${esc(q)}</div><div class="ai-a ${kind || ''}">${a === null ? '<span class="spin"></span> <span class="faint">sto pensando…</span>' : kind === 'edit' ? `<span class="edit-badge">✎ ${esc(a)}</span>` : `<div class="md">${PoliEditor.renderMarkdown(a)}</div>`}</div>`;
+    log.appendChild(item); log.scrollTop = 1e9;
+    return item;
+}
+function reviewBar(n) {
+    let bar = $('#ed-review');
+    if (!n) { if (bar) bar.remove(); Notes.reviewing = false; return; }
+    Notes.reviewing = true;
+    if (!bar) {
+        bar = document.createElement('div'); bar.id = 'ed-review'; bar.className = 'review-bar';
+        $('.ed-body').before(bar);
+    }
+    bar.innerHTML = `<span>✨ <b>${n}</b> ${n === 1 ? 'modifica proposta' : 'modifiche proposte'} dall'AI — usa ✓ / ✗ accanto a ognuna, oppure</span><span class="grow"></span><button class="small" id="rv-no">Rifiuta tutte</button><button class="small primary" id="rv-yes">Accetta tutte</button>`;
+    $('#rv-yes').onclick = () => Notes.editor.acceptAll();
+    $('#rv-no').onclick = () => Notes.editor.rejectAll();
 }
 async function askAi(instruction) {
-    const log = $('#ai-log');
+    if (Notes.editor.isReviewing()) return toast('Prima accetta o rifiuta le modifiche proposte', 4000);
+    const key = Notes.scope + ':' + Notes.file;
+    const hist = chatHistory[key] = chatHistory[key] || [];
     const sel = Notes.editor.getSelection();
-    const item = document.createElement('div'); item.className = 'ai-item';
-    item.innerHTML = `<div class="ai-q">${esc(instruction)}${sel ? ` <span class="faint">(su selezione)</span>` : ''}</div><div class="ai-a"><span class="spin"></span></div>`;
-    if (log.querySelector('p.faint')) log.innerHTML = '';
-    log.appendChild(item); log.scrollTop = 1e9;
+    const item = addChat(instruction + (sel ? ' (sulla selezione)' : ''), null);
     const a = $('.ai-a', item);
-    window.aiStreamTarget = a; a.textContent = '';
     try {
-        const out = await api.assist({ instruction, document: Notes.editor.getValue(), selection: sel, kind: Notes.kind, courseId: Notes.scope });
-        window.aiStreamTarget = null;
-        a.innerHTML = Notes.kind === 'markdown' ? `<div class="md">${PoliEditor.renderMarkdown(out)}</div>` : `<pre>${esc(out)}</pre>`;
-        const acts = document.createElement('div'); acts.className = 'row'; acts.style.marginTop = '6px';
-        acts.innerHTML = `${sel ? '<button class="small primary" data-x="rep">Sostituisci selezione</button>' : ''}<button class="small ${sel ? '' : 'primary'}" data-x="ins">Inserisci al cursore</button><button class="small ghost" data-x="end">In fondo</button>${sel ? '' : '<button class="small ghost" data-x="all" title="Sostituisce tutto il documento">Sostituisci tutto</button>'}<button class="small ghost" data-x="copy">Copia</button>`;
-        item.appendChild(acts);
-        $('[data-x="ins"]', acts).onclick = () => Notes.editor.insertAtCursor(out);
-        $('[data-x="end"]', acts).onclick = () => Notes.editor.append('\n\n' + out + '\n');
-        if ($('[data-x="all"]', acts)) $('[data-x="all"]', acts).onclick = () => { if (confirm('Sostituire tutto il documento con questa versione?')) Notes.editor.setValue(out); };
-        $('[data-x="copy"]', acts).onclick = () => navigator.clipboard.writeText(out).then(() => toast('Copiato'));
-        if (sel) $('[data-x="rep"]', acts).onclick = () => Notes.editor.replaceSelection(out);
-    } catch (e) { window.aiStreamTarget = null; a.innerHTML = `<span style="color:var(--err)">${esc(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))}</span>`; }
-    log.scrollTop = 1e9;
+        const r = await api.assist({ instruction, document: Notes.editor.getValue(), selection: sel, kind: Notes.kind, courseId: Notes.scope, history: hist.map(h => ({ q: h.q, a: h.kind === 'edit' ? '(ha modificato il documento: ' + h.a + ')' : h.a })) });
+        if (r.mode === 'edit') {
+            const n = Notes.editor.propose(r.document);
+            a.className = 'ai-a edit';
+            a.innerHTML = n ? `<span class="edit-badge">✎ ${esc(r.note)}</span><div class="faint">${n} ${n === 1 ? 'modifica' : 'modifiche'} da rivedere nel documento</div>` : '<span class="faint">Nessuna modifica necessaria.</span>';
+            hist.push({ q: instruction, a: r.note, kind: 'edit' });
+        } else {
+            a.innerHTML = `<div class="md">${PoliEditor.renderMarkdown(r.text)}</div>`;
+            const acts = document.createElement('div'); acts.className = 'row ai-acts';
+            acts.innerHTML = '<button class="small ghost" data-x="ins">Inserisci nel documento</button><button class="small ghost" data-x="copy">Copia</button>';
+            a.appendChild(acts);
+            $('[data-x="ins"]', acts).onclick = () => Notes.editor.insertAtCursor(r.text + '\n');
+            $('[data-x="copy"]', acts).onclick = () => navigator.clipboard.writeText(r.text).then(() => toast('Copiato'));
+            hist.push({ q: instruction, a: r.text });
+        }
+    } catch (e) { a.innerHTML = `<span style="color:var(--err)">${esc(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))}</span>`; }
+    if ($('#ai-log')) $('#ai-log').scrollTop = 1e9;
 }
 
 // ── Dictation (Handy-style): record → local Whisper → insert ──
@@ -289,16 +396,16 @@ async function toggleDictation() {
     rec.ondataavailable = e => chunks.push(e.data);
     rec.onstop = async () => {
         stream.getTracks().forEach(t => t.stop()); rec = null;
-        b.classList.remove('rec'); b.textContent = '⏳';
+        b.classList.remove('rec'); b.textContent = '⏳ Trascrivo…';
         try {
             const buf = await new Blob(chunks, { type: 'audio/webm' }).arrayBuffer();
             const lang = Notes.scope && course(Notes.scope) ? course(Notes.scope).language : '';
             const text = await api.dictate(buf, lang || undefined);
             if (text) Notes.editor.insertAtCursor(text + ' ');
         } catch (e) { toast(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 6000); }
-        b.textContent = '🎙';
+        b.textContent = '🎙 Detta';
     };
-    rec.start(); b.classList.add('rec'); b.textContent = '⏺ Stop';
+    rec.start(); b.classList.add('rec'); b.textContent = '⏺ Stop dettatura';
 }
 
 // ═════════════ CALENDARIO ═════════════
@@ -458,7 +565,7 @@ window.tabOverview = async (c, el) => {
         }
         $('#pg-ed', el).classList.remove('hidden'); $('#pg-view', el).classList.add('hidden'); $('#pg-edit', el).textContent = 'Fine';
         let t = null;
-        pageEd = PoliEditor.create($('#pg-ed', el), { kind: 'markdown', value: w.page, lineNumbers: false, onChange: v => { $('#pg-st', el).textContent = '…'; clearTimeout(t); t = setTimeout(() => api.ws.page(c.id, v).then(() => $('#pg-st', el).textContent = 'Salvato'), 600); } });
+        pageEd = PoliEditor.create($('#pg-ed', el), { kind: 'markdown', value: w.page.replace(/^<!--[\s\S]*?-->\s*/, ''), lineNumbers: false, onChange: v => { $('#pg-st', el).textContent = '…'; clearTimeout(t); t = setTimeout(() => api.ws.page(c.id, v).then(() => $('#pg-st', el).textContent = 'Salvato'), 600); } });
         pageEd.focus();
     };
 };
@@ -481,6 +588,11 @@ window.settingsExtra = async v => {
     recBadge('#s-model', hw.rec.model, () => $('#s-model', v).value = hw.rec.model);
 
     const engines = await api.notes.engines();
+    const [clouds, apps, searchSt] = await Promise.all([api.cloud.detect(), api.integrations.apps(), api.search.status()]);
+    const integ = (key, name, desc, detected) => field(name, desc + (detected === undefined || detected ? '' : ` <span class="pill warn">non rilevata su questo computer</span>`), sw('x-int-' + key, !!(s.integrations || {})[key]));
+    const av = S.tools.ai, cur = s.ai.provider;
+    const providerWarn = av[cur] && av[cur].path ? '' : field('Strumento AI', '', `<span class="pill err">${esc((av[cur] || {}).label || cur)} non è installato su questo computer</span><span class="faint">${Object.values(av).some(x => x.path) ? 'verrà usato ' + esc(Object.values(av).find(x => x.path).label) : 'installa Antigravity CLI, Claude Code o Gemini CLI'}</span>`);
+    const cl = s.cloud || {}, it = s.integrations || {};
     const box = $('#s-extra', v);
     box.innerHTML = `
     <div class="group"><h3>Trascrizioni</h3>
@@ -498,6 +610,28 @@ window.settingsExtra = async v => {
         ${field('Pausa lunga ogni', 'sessioni', `<input id="x-pe" type="number" min="2" max="8" style="width:70px" value="${s.pomodoro.every}">`)}
         ${field('Suono', '', sw('x-psnd', s.pomodoro.sound))}
     </div>
+    <div class="group"><h3>Sincronizzazione cloud</h3>
+        ${field('Sincronizza appunti e impostazioni', 'Appunti, pagine dei corsi, attività, impostazioni ed elenco corsi vengono salvati in una cartella cloud e ritrovati sugli altri computer. Video, trascrizioni e materiale restano in locale.', sw('x-cl-on', cl.enabled))}
+        ${field('Cartella cloud', clouds.length ? 'Rilevate su questo computer' : 'Nessuna cartella cloud trovata: installa iCloud Drive o Google Drive per desktop, oppure scegli una cartella sincronizzata', `<select id="x-cl-where" style="width:auto">${clouds.map(c => `<option value="${esc(c.path)}" data-p="${c.id}" ${cl.path === c.path ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__custom" ${cl.path && !clouds.some(c => c.path === cl.path) ? 'selected' : ''}>Altra cartella…</option></select><span class="faint" id="x-cl-path">${esc(cl.path ? cl.path + '/PoliRec' : '')}</span>`)}
+        ${cl.enabled ? field('Stato', '', `<span class="pill ok">☁ attiva</span><span class="faint">${cl.lastPushed ? 'ultimo invio ' + new Date(cl.lastPushed).toLocaleString('it-IT') : ''}</span><span class="grow"></span><button id="x-cl-pull">Aggiorna ora</button>`) : ''}
+    </div>
+    <div class="group"><h3>AI</h3>
+        ${field('Descrizione del corso automatica', 'La «Pagina del corso» viene scritta e aggiornata dall\'AI dai sommari delle lezioni (finché non la modifichi tu)', sw('x-ai-page', s.ai.autoCoursePage !== false))}
+        ${field('Ricerca semantica', 'Cerca per significato in lezioni, appunti e slide (anche tra lingue diverse). Tutto in locale.', `<span class="pill ${searchSt.ready ? 'ok' : 'warn'}">${searchSt.ready ? Object.values(searchSt.counts).reduce((a, b) => a + b, 0) + ' frammenti indicizzati' : 'non installata'}</span><span class="grow"></span>${searchSt.ready ? '<button id="x-idx">Aggiorna indice</button>' : '<button class="primary" id="x-sinst">Installa (~250 MB)</button>'}`)}
+        ${providerWarn}
+    </div>
+    <div class="group"><h3>Integrazioni</h3>
+        <p class="muted" style="margin:4px 18px 8px">Attiva le app in cui vuoi esportare gli appunti: compariranno nel menu «Esporta» di ogni appunto. L'esportazione in PDF è sempre disponibile.</p>
+        ${integ('notion', 'Notion', 'Crea una pagina Notion per ogni appunto esportato (titoli, liste, checklist, formule, codice).', true)}
+        <div id="x-notion-cfg" class="${it.notion ? '' : 'hidden'}">
+            ${field('Token di integrazione', 'notion.so/my-integrations → Nuova integrazione → copia il «Internal Integration Secret»', `<input id="x-nt" type="password" placeholder="ntn_… / secret_…" value="${esc(it.notionToken || '')}">`)}
+            ${field('Pagina di destinazione', 'Nella pagina: ••• → Connessioni → aggiungi la tua integrazione, poi incolla qui il link', `<input id="x-np" placeholder="https://www.notion.so/…" value="${esc(it.notionParent || '')}"><button id="x-ntest">Prova</button>`)}
+        </div>
+        ${integ('applenotes', 'Note di Apple', 'Crea una nota in Note di Apple (solo macOS).', apps.notes)}
+        ${integ('goodnotes', 'Goodnotes', 'Esporta il PDF dell\'appunto e lo apre in Goodnotes per annotarlo a mano.', apps.goodnotes)}
+        ${integ('notability', 'Notability', 'Esporta il PDF e lo apre in Notability.', apps.notability)}
+        ${integ('obsidian', 'Obsidian', 'Apre l\'appunto in Obsidian. Usa come vault la cartella degli appunti (o la cartella cloud).', apps.obsidian)}
+    </div>
     <div class="group"><h3>Informazioni</h3>
         ${field(`${esc(about.name)} ${esc(about.version)}`, `Electron ${esc(about.electron)} · ${esc(about.platform)} · dati in ${esc(about.dataDir)}`, '<button id="x-upd">Controlla aggiornamenti</button>')}
         ${field('Gratis e open source', 'PoliRec è gratuito per tutti gli studenti. Se ti è utile, puoi offrire un caffè allo sviluppatore ☕', about.donateUrl ? '<button class="primary" id="x-coffee">☕ Buy me a coffee</button>' : '<span class="faint">link donazioni non configurato</span>')}
@@ -505,6 +639,35 @@ window.settingsExtra = async v => {
         ${field('Avviso', 'App non ufficiale, non affiliata né approvata dal Politecnico di Milano. Usa le registrazioni solo per studio personale, nel rispetto del regolamento di Ateneo e del diritto d\'autore dei docenti.', '')}
     </div>`;
     const saveX = patch => api.saveSettings(patch).then(() => refresh());
+    // cloud
+    const applyCloud = async (enabled, p) => {
+        const opt = $('#x-cl-where', box).selectedOptions[0];
+        const r = await api.cloud.set({ enabled, provider: opt ? opt.dataset.p || 'custom' : 'custom', path: p });
+        if (enabled) toast(`☁ Sincronizzazione attiva${r.copied ? ` · ${r.copied} file copiati` : ''}${r.pulled && r.pulled.changed ? ` · importato da ${r.pulled.from}` : ''}`, 5000); else toast('Sincronizzazione disattivata');
+        await refresh(); $('#view').dataset.view = ''; render();
+    };
+    const pickCloudPath = async () => {
+        const sel = $('#x-cl-where', box).value;
+        if (sel !== '__custom') return sel;
+        const d = await api.pickDir(cl.path || ''); return d;
+    };
+    $('#x-cl-on', box).onchange = e => guard(async () => {
+        if (!e.target.checked) return applyCloud(false, cl.path);
+        const p = await pickCloudPath(); if (!p) { e.target.checked = false; return; }
+        if (!confirm(`Attivare la sincronizzazione in:\n${p}/PoliRec ?\n\nGli appunti esistenti vengono copiati (gli originali restano dove sono).`)) { e.target.checked = false; return; }
+        await applyCloud(true, p);
+    });
+    $('#x-cl-where', box).onchange = () => guard(async () => { if (!cl.enabled) return; const p = await pickCloudPath(); if (p) await applyCloud(true, p); });
+    if ($('#x-cl-pull', box)) $('#x-cl-pull', box).onclick = () => guard(async () => { const r = await api.cloud.pull(); toast(r.changed ? `Aggiornato da ${r.from}` : 'Già aggiornato'); refresh(); });
+    // integrations (opt-in)
+    const saveIt = () => saveX({ integrations: { ...(S.settings.integrations || {}), notionToken: $('#x-nt', box).value.trim(), notionParent: $('#x-np', box).value.trim(), ...Object.fromEntries(['notion', 'applenotes', 'goodnotes', 'notability', 'obsidian'].map(k => [k, $('#x-int-' + k, box).checked])) } });
+    ['notion', 'applenotes', 'goodnotes', 'notability', 'obsidian'].forEach(k => $('#x-int-' + k, box).onchange = () => { if (k === 'notion') $('#x-notion-cfg', box).classList.toggle('hidden', !$('#x-int-notion', box).checked); saveIt(); });
+    $('#x-nt', box).onchange = saveIt; $('#x-np', box).onchange = saveIt;
+    $('#x-ntest', box).onclick = () => guard(async () => { await saveIt(); const t = await api.integrations.testNotion($('#x-nt', box).value.trim(), $('#x-np', box).value.trim()); toast(`Notion collegato ✓ (pagina «${t}»)`, 4000); });
+    // AI
+    $('#x-ai-page', box).onchange = e => saveX({ ai: { ...S.settings.ai, autoCoursePage: e.target.checked } });
+    if ($('#x-idx', box)) $('#x-idx', box).onclick = () => guard(async () => { $('#x-idx', box).disabled = true; $('#x-idx', box).textContent = 'Indicizzo…'; await api.search.index(); toast('Indice aggiornato'); window.settingsExtra(v); });
+    if ($('#x-sinst', box)) $('#x-sinst', box).onclick = () => guard(async () => { $('#x-sinst', box).disabled = true; $('#x-sinst', box).textContent = 'Installo…'; const ok = await api.search.install(); toast(ok ? 'Ricerca semantica installata: indicizzo i corsi…' : 'Installazione non riuscita (vedi Attività)'); window.settingsExtra(v); });
     $$('#x-eng button', box).forEach(b => b.onclick = () => guard(async () => {
         $$('#x-eng button', box).forEach(x => x.classList.toggle('on', x === b));
         toast(b.dataset.v === 'parakeet' ? 'Preparo Parakeet (al primo uso scarica ~1 GB)…' : 'Motore Whisper attivo', 4000);

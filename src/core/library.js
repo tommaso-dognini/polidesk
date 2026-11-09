@@ -18,10 +18,12 @@ const DEFAULT_SETTINGS = {
     pomodoro: { focus: 25, short: 5, long: 15, every: 4, sound: true },
     rooms: { sede: 'MIA', minutes: 60 },
     notesRoot: '',
-    ai: { provider: 'agy', model: '', autoNotes: false, autoSummary: true },
+    ai: { provider: 'agy', model: '', autoNotes: false, autoSummary: true, autoCoursePage: true },
     autoSync: { onStart: true, intervalHours: 0 },
     ui: { theme: 'normal', font: 'system', appearance: 'auto' },
     setupDone: false,
+    cloud: { enabled: false, provider: '', path: '', lastPulled: '', lastPushed: '' },
+    integrations: { notion: false, notionToken: '', notionParent: '', applenotes: false, goodnotes: false, notability: false, obsidian: false },
     defaultRoot: '',
     polimiEmail: '',
 };
@@ -52,7 +54,11 @@ function patchCourse(id, patch) {
     return cfg;
 }
 
-function saveConfig(cfg) {
+function saveConfig(cfg, { noExport = false } = {}) {
+    // mirror settings + course list to the cloud folder (iCloud/Drive/…) when sync is on
+    if (!noExport && cfg.settings && cfg.settings.cloud && cfg.settings.cloud.enabled) {
+        try { cfg.settings.cloud.lastPushed = require('./cloud').exportConfig(cfg) || cfg.settings.cloud.lastPushed; } catch (e) { }
+    }
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
 }
 

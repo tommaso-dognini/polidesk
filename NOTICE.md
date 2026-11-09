@@ -35,6 +35,7 @@ linkati nella pagina *Community*: senza licenza il loro codice non può essere r
 | [Electron](https://www.electronjs.org/) | MIT |
 | [puppeteer-core](https://pptr.dev/) | Apache-2.0 |
 | [CodeMirror 6](https://codemirror.net/) | MIT |
+| [@codemirror/merge](https://github.com/codemirror/merge) | MIT (revisione inline delle modifiche proposte dall'AI) |
 | [markdown-it](https://github.com/markdown-it/markdown-it) | MIT |
 | [KaTeX](https://katex.org/) (codice e font) | MIT |
 | [luxon](https://moment.github.io/luxon/), [uuid](https://github.com/uuidjs/uuid) | MIT |
@@ -51,6 +52,9 @@ linkati nella pagina *Community*: senza licenza il loro codice non può essere r
 | [mlx-whisper](https://github.com/ml-explore/mlx-examples) / [faster-whisper](https://github.com/SYSTRAN/faster-whisper) / [openai-whisper](https://github.com/openai/whisper) e pesi Whisper | MIT | Setup trascrizione |
 | [parakeet-mlx](https://github.com/senstella/parakeet-mlx) | Apache-2.0 | Motore Parakeet (opzionale) |
 | [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | CC-BY-4.0 (attribuzione: NVIDIA) | Motore Parakeet (opzionale) |
+| [fastembed](https://github.com/qdrant/fastembed) | Apache-2.0 | Ricerca semantica |
+| [paraphrase-multilingual-MiniLM-L12-v2](https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2) | Apache-2.0 | Ricerca semantica (modello di embedding) |
+| [pypdf](https://github.com/py-pdf/pypdf) | BSD-3-Clause | Testo delle slide PDF per la ricerca |
 | [uv](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | Solo se non c'è un Python adatto |
 
 Gli strumenti AI esterni (Antigravity CLI, Claude Code, Gemini CLI) non sono inclusi: PoliRec li richiama

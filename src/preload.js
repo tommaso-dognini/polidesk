@@ -30,6 +30,16 @@ contextBridge.exposeInMainWorld('polirec', {
     setupInstall: rec => invoke('setup:install', rec),
     setupSkip: () => invoke('setup:skip'),
     hw: () => invoke('hw'),
+    cloud: { detect: () => invoke('cloud:detect'), set: o => invoke('cloud:set', o), pull: () => invoke('cloud:pull') },
+    integrations: { apps: () => invoke('integrations:apps'), testNotion: (token, parent) => invoke('integrations:testNotion', { token, parent }) },
+    exportNote: (scope, file, target, html) => invoke('notes:exportTo', { scope, file, target, html }),
+    search: {
+        status: () => invoke('search:status'), ready: () => invoke('search:ready'), install: () => invoke('search:install'),
+        query: (text, courseId, k) => invoke('search:query', { text, courseId, k }), ask: (question, courseId) => invoke('search:ask', { question, courseId }),
+        index: courseId => invoke('search:index', courseId),
+    },
+    aiBackfill: ids => invoke('ai:backfill', ids),
+    genCoursePage: id => invoke('course:genPage', id),
     setEngine: (engine, model) => invoke('engine:set', { engine, model }),
     ws: {
         get: courseId => invoke('ws:get', courseId),

@@ -15,6 +15,9 @@ const dl = require('./core/downloader');
 const setup = require('./core/setup');
 const cleaner = require('./core/cleaner');
 const extra = require('./ipc-extra');
+const ws = require('./core/workspace');
+const cloud = require('./core/cloud');
+const search = require('./core/search');
 
 let win = null;
 let session = null;
@@ -66,13 +69,107 @@ function queueTranscription(course, rec) {
             if (cfg().settings.transcription.clean !== false) {
                 try { cleaner.cleanTranscriptFiles(dirs.transcripts, rec.file.replace(/\.mp4$/i, '')); } catch (e) { log('⚠ Pulizia trascrizione: ' + e.message, course.id); }
             }
-            const s = cfg().settings.ai;
-            if (s.autoSummary) await generateNotes(course, rec.key, 'sommario').catch(e => log('✗ Sommario: ' + e.message, course.id));
-            if (s.autoNotes) await generateNotes(course, rec.key, 'appunti').catch(e => log('✗ Note: ' + e.message, course.id));
             lib.writeIndex(course.dir, lib.loadManifest(course.dir));
             send({ type: 'refresh' });
+            aiBackfill([course.id]);          // summary / notes / course page through the AI queue
+            scheduleIndex(course.id);
         })
         .catch(e => log(`✗ Trascrizione ${rec.file}: ${e.message}`, course.id));
+}
+
+// ---------- AI queue (sequential, visible in the UI) ----------
+const aiq = { list: [], current: null };
+function aiQueueState() { send({ type: 'ai-queue', pending: aiq.list.length, current: aiq.current && aiq.current.label, items: aiq.list.slice(0, 20).map(j => j.label) }); }
+function enqueueAi(job) {
+    if (aiq.list.some(j => j.id === job.id) || (aiq.current && aiq.current.id === job.id)) return;
+    aiq.list.push(job); aiQueueState();
+    if (!aiq.current) runAiQueue();
+}
+async function runAiQueue() {
+    while (aiq.list.length) {
+        aiq.current = aiq.list.shift(); aiQueueState();
+        try { await aiq.current.run(); }
+        catch (e) { log(`✗ AI · ${aiq.current.label}: ${e.message}`); send({ type: 'ai-failed', label: aiq.current.label, error: e.message }); }
+    }
+    aiq.current = null; aiQueueState(); send({ type: 'refresh' });
+}
+
+/** Queue whatever AI output is enabled but missing (also for lessons transcribed earlier). */
+function aiBackfill(courseIds) {
+    const c0 = cfg(), s = c0.settings.ai;
+    let avail = true; try { extra.pickProvider(c0.settings); } catch (e) { avail = false; }
+    if (!avail) return 0;
+    let n = 0;
+    for (const c of c0.courses.filter(c => !courseIds || courseIds.includes(c.id))) {
+        if (!fs.existsSync(c.dir)) continue;
+        const recs = lib.withFileStatus(c.dir, lib.loadManifest(c.dir)).filter(r => r.transcript);
+        for (const r of recs) {
+            const has = t => r.notes.some(f => f.endsWith(` - ${t}.md`));
+            if (s.autoSummary && !has('sommario')) { enqueueAi({ id: `${c.id}:${r.key}:sommario`, label: `Sommario · ${r.displayTitle}`, run: () => generateNotes(c, r.key, 'sommario') }); n++; }
+            if (s.autoNotes && !has('appunti')) { enqueueAi({ id: `${c.id}:${r.key}:appunti`, label: `Appunti · ${r.displayTitle}`, run: () => generateNotes(c, r.key, 'appunti') }); n++; }
+        }
+        if (s.autoCoursePage !== false && recs.length) {
+            const w = ws.load(cloud.courseDataDir(c0.settings, c));
+            const auto = !w.page.trim() || w.page.startsWith('<!-- polirec:auto');
+            const summaries = recs.filter(r => r.notes.some(f => f.endsWith(' - sommario.md'))).length;
+            if (auto && (!w.pageAuto || w.pageAuto.summaries !== summaries) && summaries)
+                { enqueueAi({ id: `${c.id}:page`, label: `Descrizione corso · ${c.name || c.input}`, run: () => generateCoursePage(c) }); n++; }
+        }
+    }
+    return n;
+}
+
+/** Course page (Markdown) generated from lesson summaries, materials and timetable. */
+async function generateCoursePage(c, force) {
+    const c0 = cfg();
+    const dataDir = cloud.courseDataDir(c0.settings, c);
+    const w = ws.load(dataDir);
+    if (!force && w.page.trim() && !w.page.startsWith('<!-- polirec:auto')) return;   // never overwrite the user's own page
+    const m = lib.loadManifest(c.dir);
+    const recs = lib.withFileStatus(c.dir, m).sort((a, b) => (a.isoDate || '').localeCompare(b.isoDate || ''));
+    const d = lib.courseDirs(c.dir);
+    const lessons = recs.map(r => {
+        const f = r.notes.find(n => n.endsWith(' - sommario.md'));
+        const sum = f ? fs.readFileSync(path.join(d.notes, f), 'utf8').trim() : '';
+        return `### ${(r.isoDate || '').slice(0, 10)} — ${r.displayTitle}${r.teacher ? ' (' + r.teacher + ')' : ''} [${r.type || ''}]\n${sum}`;
+    }).join('\n\n');
+    const mats = Object.values(m.materials || {}).map(v => v.path).slice(0, 80).join('\n');
+    let slots = '';
+    try {
+        const tt = require('./core/timetable');
+        const ev = tt.occurrences(new Date(), new Date(Date.now() + 7 * 864e5)).filter(e => tt.matchCourse(e.summary, { ...c, manifest: m }));
+        slots = ev.map(e => `${new Date(e.start).toLocaleDateString('it-IT', { weekday: 'long' })} ${new Date(e.start).toTimeString().slice(0, 5)}–${new Date(e.end).toTimeString().slice(0, 5)} ${e.location}`).join('\n');
+    } catch (e) { }
+    const prompt = `Scrivi la pagina di presentazione (in italiano, Markdown) del corso universitario "${(m.course && m.course.fullname) || c.name}", per uno studente che lo frequenta. ` +
+        `Usa SOLO le informazioni fornite. Struttura:\n## Di cosa parla (3-5 frasi)\n## Programma svolto finora (elenco degli argomenti raggruppati per tema, con le date)\n## Concetti chiave (8-15 punti, formule in $…$ se utili)\n` +
+        `## Esame e info pratiche (solo se emergono dalle lezioni; altrimenti ometti)\n## Orario (se fornito)\n## Materiale principale (se fornito, max 10 voci)\nNiente introduzioni né chiusure.`;
+    const input = `<lezioni>\n${lessons}\n</lezioni>\n<materiale>\n${mats}\n</materiale>\n<orario>\n${slots}\n</orario>`;
+    const prov = extra.pickProvider(c0.settings);
+    const md = await ai.runPrompt(prov, prompt, input, { model: c0.settings.ai.model, cwd: require('os').tmpdir() });
+    const summaries = recs.filter(r => r.notes.some(f => f.endsWith(' - sommario.md'))).length;
+    ws.update(dataDir, x => { x.page = `<!-- polirec:auto ${new Date().toISOString().slice(0, 10)} — generata dall'AI, modificala liberamente: non verrà più sovrascritta -->\n` + md.trim() + '\n'; x.pageAuto = { at: new Date().toISOString(), summaries }; });
+    send({ type: 'refresh' });
+    scheduleIndex(c.id);
+}
+
+// ---------- semantic index (debounced, incremental) ----------
+const indexTimers = {};
+function scheduleIndex(courseId, delay = 20000) {
+    clearTimeout(indexTimers[courseId || 'g']);
+    indexTimers[courseId || 'g'] = setTimeout(async () => {
+        const c0 = cfg();
+        if (!(await searchReady())) return;
+        try {
+            if (courseId) { const c = c0.courses.find(x => x.id === courseId); if (c) await search.indexCourse(c0.settings, c, m => send({ type: 'log', msg: m })); }
+            else await search.indexGeneral(c0.settings);
+            send({ type: 'search-indexed', course: courseId });
+        } catch (e) { log('✗ Indice di ricerca: ' + e.message); }
+    }, delay);
+}
+let searchOk = null;
+function searchReady() {
+    if (searchOk !== null) return Promise.resolve(searchOk);
+    return new Promise(r => require('child_process').execFile(cfg().settings.transcription.python, ['-c', 'import fastembed, pypdf'], e => { searchOk = !e; r(searchOk); }));
 }
 
 async function generateNotes(course, key, template, provider) {
@@ -83,7 +180,7 @@ async function generateNotes(course, key, template, provider) {
     if (!st.transcript) throw new Error('trascrizione mancante: trascrivi prima la lezione');
     const dirs = lib.courseDirs(course.dir);
     const s = cfg().settings.ai;
-    const prov = provider || s.provider;
+    const prov = provider || extra.pickProvider(cfg().settings);
     const jobId = crypto.randomUUID();
     send({ type: 'ai-start', jobId, course: course.id, key, template, provider: prov });
     try {
@@ -146,6 +243,7 @@ async function runSyncQueue() {
                 patchCourse(id, { webeepId: c.webeepId, name: c.name, lastSync: new Date().toISOString(), lastError: null });
                 total += r.downloaded || 0;
                 send({ type: 'sync-course', course: id, state: 'done', result: r });
+                aiBackfill([id]); scheduleIndex(id, 3000);
             } catch (e) {
                 patchCourse(id, { lastError: e.message });
                 log(`✗ ${c.name || c.input}: ${e.message}`, id);
@@ -208,7 +306,7 @@ handle('course:add', async ({ input, dir, name, materials, language }) => {
     return courseView(c);
 });
 handle('course:update', async ({ id, patch }) => { patchCourse(id, patch); return courseView(findCourse(id)); });
-handle('course:remove', async id => { const all = cfg(); all.courses = all.courses.filter(c => c.id !== id); lib.saveConfig(all); return true; });
+handle('course:remove', async id => { const all = cfg(); all.courses = all.courses.filter(c => c.id !== id); all.deletedCourses = [...new Set([...(all.deletedCourses || []), id])]; lib.saveConfig(all); return true; });
 handle('course:reorder', async ids => {
     const all = cfg();
     all.courses.sort((a, b) => ids.indexOf(a.id) - ids.indexOf(b.id));
@@ -246,7 +344,7 @@ handle('notes:batch', async ({ courseId, template, provider }) => {
 handle('agent', async ({ courseId, prompt, provider }) => {
     const c = findCourse(courseId);
     const s = cfg().settings.ai;
-    const prov = provider || s.provider;
+    const prov = provider || extra.pickProvider(cfg().settings);
     const jobId = crypto.randomUUID();
     const preamble = `Stai lavorando nella cartella di un corso universitario (${c.name || ''}). Struttura: video/ (registrazioni), trascrizioni/ (trascrizioni Whisper .txt/.srt, possono contenere errori), materiale/ (slide e PDF del corso), note/ (appunti in Markdown), INDICE.md. Salva sempre i file che produci dentro note/ in formato Markdown. Non modificare né cancellare video, trascrizioni e materiale.\n\nRichiesta: `;
     send({ type: 'ai-start', jobId, course: c.id, agent: true, provider: prov });
@@ -285,9 +383,32 @@ handle('recording', async ({ courseId, key }) => {
     return { rec, segments, text, notes, videoPath, videoUrl: rec.videoExists ? 'media://local/' + encodeURIComponent(videoPath) : null };
 });
 
-extra.register({ handle, send, cfg, findCourse, getSession, closeSession, isSyncing: () => syncing });
+extra.register({ handle, send, cfg, findCourse, getSession, closeSession, isSyncing: () => syncing, onNotesChanged: scope => scheduleIndex(scope || null, 30000) });
 
-handle('settings:save', async s => { const c = cfg(); c.settings = { ...c.settings, ...s }; lib.saveConfig(c); scheduleAutoSync(); return c.settings; });
+handle('settings:save', async s => {
+    const c = cfg(); const before = JSON.stringify(c.settings.ai);
+    c.settings = { ...c.settings, ...s }; lib.saveConfig(c); scheduleAutoSync();
+    if (s.ai && JSON.stringify(c.settings.ai) !== before) aiBackfill();   // newly enabled AI features apply to past lessons too
+    return c.settings;
+});
+
+// AI queue + course page + semantic search
+handle('ai:backfill', async ids => aiBackfill(ids));
+handle('ai:queue', async () => ({ pending: aiq.list.length, current: aiq.current && aiq.current.label }));
+handle('course:genPage', async id => { const c = findCourse(id); enqueueAi({ id: `${id}:page`, label: `Descrizione corso · ${c.name || c.input}`, run: () => generateCoursePage(c, true) }); return true; });
+handle('search:ready', async () => { searchOk = null; return searchReady(); });
+handle('search:install', async () => { await setup.addPackage(['fastembed', 'pypdf'], l => send({ type: 'log', msg: l })); searchOk = null; const ok = await searchReady(); if (ok) for (const c of cfg().courses) scheduleIndex(c.id, 500); return ok; });
+handle('search:query', async ({ text, courseId, k }) => search.query(cfg(), text, { courseId, k }));
+handle('search:ask', async ({ question, courseId }) => {
+    const jobId = crypto.randomUUID();
+    send({ type: 'ai-start', jobId, provider: extra.pickProvider(cfg().settings), ask: true });
+    const c0 = cfg(); c0.settings.ai.provider = extra.pickProvider(c0.settings);
+    const r = await search.ask(c0, question, { courseId, onChunk: ch => send({ type: 'ai-chunk', jobId, chunk: ch }) });
+    send({ type: 'ai-done', jobId, ask: true });
+    return r;
+});
+handle('search:index', async courseId => { if (!(await searchReady())) throw new Error('Ricerca semantica non installata'); const c0 = cfg(); return courseId ? search.indexCourse(c0.settings, findCourse(courseId), m => send({ type: 'log', msg: m })) : search.indexAll(c0, m => send({ type: 'log', msg: m })); });
+handle('search:status', async () => ({ ready: await searchReady(), counts: search.status(cfg()) }));
 
 handle('pick-dir', async def => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: def || cfg().settings.defaultRoot || undefined });
@@ -343,6 +464,7 @@ function createWindow() {
     win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media' || perm === 'notifications'));
     win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    win.on('focus', () => cloudPull(true));
     win.webContents.on('console-message', e => { if (e.level === 'warning' || e.level === 'error') console.error('[renderer]', e.message); });
     win.webContents.once('did-finish-load', () => {
         const st = cfg().settings;
@@ -379,10 +501,22 @@ function serveMedia(req) {
     return new Response(toWeb(0, st.size - 1), { status: 200, headers: { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(st.size) } });
 }
 
+// pull settings/courses changed on another computer (cloud folder)
+function cloudPull(notifyUser) {
+    try {
+        const c = cfg();
+        const r = require('./core/cloud').importConfig(c);
+        if (r.changed) { lib.saveConfig(c, { noExport: true }); send({ type: 'refresh' }); if (notifyUser) send({ type: 'log', msg: `☁ Impostazioni aggiornate da ${r.from}${r.added ? ` (+${r.added} corsi)` : ''}` }); }
+    } catch (e) { }
+}
+
 app.whenReady().then(() => {
+    cloudPull(false);
+    setInterval(() => cloudPull(true), 2 * 60 * 1000);
     protocol.handle('media', req => serveMedia(req));
     createWindow();
     scheduleAutoSync();
+    if (!process.env.POLIREC_SMOKE) setTimeout(() => { if (cfg().settings.setupDone) { aiBackfill(); for (const c of cfg().courses) scheduleIndex(c.id, 15000); scheduleIndex(null, 15000); } }, 8000);
 });
-app.on('window-all-closed', async () => { transcriber.cancelAll(); await closeSession(); app.quit(); });
+app.on('window-all-closed', async () => { transcriber.cancelAll(); search.stop(); await closeSession(); app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });

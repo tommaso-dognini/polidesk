@@ -74,16 +74,16 @@ function detect() {
 /** Pick engine + model for this machine. */
 function recommend(hw) {
     if (hw.appleSilicon) {
-        return { engine: 'mlx', model: hw.ramGB >= 16 ? 'large-v3-turbo' : hw.ramGB >= 8 ? 'small' : 'base', device: 'Apple GPU (Metal)', packages: ['mlx-whisper'] };
+        return { engine: 'mlx', model: hw.ramGB >= 16 ? 'large-v3-turbo' : hw.ramGB >= 8 ? 'small' : 'base', device: 'Apple GPU (Metal)', packages: ['mlx-whisper', 'fastembed', 'pypdf'] };
     }
     if (hw.nvidia) {
         const big = hw.nvidia.vramGB >= 6;
-        const pk = ['faster-whisper'];
+        const pk = ['faster-whisper', 'fastembed', 'pypdf'];
         if (process.platform !== 'darwin') pk.push('nvidia-cublas-cu12', 'nvidia-cudnn-cu12==9.*');
         return { engine: 'faster', model: big ? 'large-v3-turbo' : 'small', device: `NVIDIA ${hw.nvidia.name} (CUDA)`, packages: pk, cuda: true };
     }
     const strong = hw.cores >= 8 && hw.ramGB >= 16;
-    return { engine: 'faster', model: strong ? 'small' : hw.ramGB >= 8 ? 'base' : 'tiny', device: `CPU (${hw.cores} core, int8)`, packages: ['faster-whisper'] };
+    return { engine: 'faster', model: strong ? 'small' : hw.ramGB >= 8 ? 'base' : 'tiny', device: `CPU (${hw.cores} core, int8)`, packages: ['faster-whisper', 'fastembed', 'pypdf'] };
 }
 
 /**
@@ -130,12 +130,13 @@ async function install(rec, { onStep = () => { }, onLog = () => { } } = {}) {
 }
 
 /** Add an extra engine package to the private env (e.g. parakeet-mlx). */
-async function addPackage(pkg, onLog = () => { }) {
+async function addPackage(pkgs, onLog = () => { }) {
+    const list = Array.isArray(pkgs) ? pkgs : [pkgs];
     const py = venvPython();
     if (!fs.existsSync(py)) throw new Error('Esegui prima il setup');
     const uv = dl.which('uv');
-    if (uv) await run(uv, ['pip', 'install', '--python', py, pkg], { onLine: onLog });
-    else await run(py, ['-m', 'pip', 'install', pkg], { onLine: onLog });
+    if (uv) await run(uv, ['pip', 'install', '--python', py, ...list], { onLine: onLog });
+    else await run(py, ['-m', 'pip', 'install', ...list], { onLine: onLog });
 }
 
 module.exports = { detect, recommend, install, addPackage, VENV, venvPython };

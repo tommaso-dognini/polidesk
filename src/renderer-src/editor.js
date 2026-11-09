@@ -10,6 +10,7 @@ import { stex } from '@codemirror/legacy-modes/mode/stex';
 import { tags as t } from '@lezer/highlight';
 import MarkdownIt from 'markdown-it';
 import katex from 'katex';
+import { unifiedMergeView, getChunks, acceptChunk, rejectChunk } from '@codemirror/merge';
 
 // --- Typst: small stream mode (headings, functions, math, strings, comments, markup) ---
 const typstMode = {
@@ -64,23 +65,71 @@ function langFor(kind) {
     return markdown();
 }
 
-function create(parent, { kind = 'markdown', value = '', onChange = () => { }, onSave = () => { }, lineNumbers = true, wrap = true } = {}) {
+function create(parent, { kind = 'markdown', value = '', onChange = () => { }, onSave = () => { }, onReviewChange = () => { }, lineNumbers = true, wrap = true } = {}) {
     const lang = new Compartment();
+    const merge = new Compartment();
+    let reviewing = false;
     const view = new EditorView({
         parent,
         state: EditorState.create({
             doc: value,
             extensions: [
                 basicSetup, keymap.of([indentWithTab, { key: 'Mod-s', run: () => { onSave(); return true; } }]),
-                lang.of(langFor(kind)), syntaxHighlighting(hl), theme,
+                lang.of(langFor(kind)), syntaxHighlighting(hl), theme, merge.of([]),
                 wrap ? EditorView.lineWrapping : [], placeholder('Scrivi qui…'),
-                EditorView.updateListener.of(u => { if (u.docChanged) onChange(u.state.doc.toString()); }),
+                EditorView.updateListener.of(u => {
+                    if (u.docChanged && !reviewing) onChange(u.state.doc.toString());
+                    if (reviewing && !proposing) {
+                        const ch = getChunks(u.state);
+                        const n = ch ? ch.chunks.length : 0;
+                        onReviewChange(n);
+                        if (n === 0) endReviewSoon();
+                    }
+                }),
                 lineNumbers ? [] : EditorView.theme({ '.cm-gutters': { display: 'none' } }),
             ],
         }),
     });
+    // AI suggestions shown inline as a diff; each change can be accepted / rejected
+    let proposing = false, endT = null;
+    // one transaction: enable the diff view against the current text AND swap in the proposal
+    function propose(newDoc) {
+        if (reviewing) endReview();
+        const original = view.state.doc.toString();
+        if (original === newDoc) return 0;
+        reviewing = true; proposing = true;
+        view.dispatch({
+            effects: merge.reconfigure(unifiedMergeView({ original, mergeControls: (type, action) => { const b = document.createElement('button'); b.className = 'mc-' + type; b.textContent = type === 'accept' ? '✓ Accetta' : '✕ Rifiuta'; b.onmousedown = action; return b; }, highlightChanges: true, gutter: true, syntaxHighlightDeletions: true })),
+            changes: { from: 0, to: view.state.doc.length, insert: newDoc },
+        });
+        proposing = false;
+        const ch = getChunks(view.state);
+        const n = ch ? ch.chunks.length : 0;
+        if (!n) { endReview(); return 0; }
+        onReviewChange(n);
+        view.dispatch({ effects: EditorView.scrollIntoView(ch.chunks[0].fromB, { y: 'center' }) });
+        return n;
+    }
+    function endReviewSoon() { clearTimeout(endT); endT = setTimeout(() => { const ch = getChunks(view.state); if (!ch || !ch.chunks.length) endReview(); }, 0); }
+    function endReview() {
+        clearTimeout(endT);
+        if (!reviewing) return;
+        reviewing = false;
+        view.dispatch({ effects: merge.reconfigure([]) });
+        onReviewChange(0);
+        onChange(view.state.doc.toString());
+    }
+    function resolveAll(accept) {
+        let ch;
+        while (reviewing && (ch = getChunks(view.state)) && ch.chunks.length) {
+            const c = ch.chunks[0];
+            (accept ? acceptChunk : rejectChunk)(view, c.fromB);
+        }
+        endReview();
+    }
     return {
         view,
+        propose, acceptAll: () => resolveAll(true), rejectAll: () => resolveAll(false), isReviewing: () => reviewing,
         getValue: () => view.state.doc.toString(),
         setValue: v => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: v } }),
         getSelection: () => { const r = view.state.selection.main; return view.state.sliceDoc(r.from, r.to); },

@@ -84,7 +84,7 @@ function render() {
     // the recording page owns a <video>: never re-render it on state refresh, only update panels
     if (route.name === 'recording' && v.dataset.view === 'recording:' + route.key) { updateRecordingLive(); return; }
     // don't wipe forms the user is typing in
-    if ((route.name === 'settings' || route.name === 'setup' || ['impostazioni', 'panoramica'].includes(route.tab) || (window.noRerender && window.noRerender.has(route.name)) || ['calendar', 'rooms', 'todos'].includes(route.name)) && v.dataset.view === viewKey()) return;
+    if ((route.name === 'settings' || route.name === 'setup' || ['impostazioni', 'panoramica'].includes(route.tab) || (window.noRerender && window.noRerender.has(route.name)) || ['calendar', 'rooms', 'todos', 'search'].includes(route.name)) && v.dataset.view === viewKey()) return;
     v.dataset.view = viewKey();
     (views[route.name] || viewDashboard)(v);
 }
@@ -358,8 +358,9 @@ function drawPlayer(c, r) {
         </div>`;
     const vid = player = $('#vid');
     const saved = Number(localStorage.getItem('speed') || 1); vid.playbackRate = saved; $('#p-speed').value = String(saved);
-    const pos = Number(localStorage.getItem('pos:' + r.key) || 0);
-    vid.addEventListener('loadedmetadata', () => { if (pos > 5 && pos < vid.duration - 5) vid.currentTime = pos; });
+    const fromSearch = route.t != null ? Number(route.t) : null;   // opened from search: jump to that minute
+    const pos = fromSearch != null ? fromSearch : Number(localStorage.getItem('pos:' + r.key) || 0);
+    vid.addEventListener('loadedmetadata', () => { if ((fromSearch != null || pos > 5) && pos < vid.duration - 5) vid.currentTime = pos; });
     vid.addEventListener('ratechange', () => { $('#p-speed').value = String(vid.playbackRate); });
     $('#p-play').onclick = () => vid.paused ? vid.play() : vid.pause();
     vid.onclick = () => $('#p-play').click();
@@ -683,7 +684,7 @@ $('#act-toggle').onclick = () => $('#activity').classList.toggle('open');
 let rafPending = false;
 // Views with their own state (editors, forms, players, async pages) must not be rebuilt on background
 // events: only the sidebar is refreshed. Data-driven lists (dashboard, lessons…) re-render.
-const isSticky = () => ['recording', 'settings', 'setup', 'notes', 'calendar', 'rooms', 'todos', 'community'].includes(route.name)
+const isSticky = () => ['recording', 'settings', 'setup', 'notes', 'calendar', 'rooms', 'todos', 'community', 'search'].includes(route.name)
     || ['impostazioni', 'panoramica'].includes(route.tab);
 const soft = () => { if (rafPending) return; rafPending = true; requestAnimationFrame(() => { rafPending = false; if (!S) return; if (isSticky()) { renderSidebar(); return; } $('#view').dataset.view = ''; render(); }); };
 let refreshT = null;
