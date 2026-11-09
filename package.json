@@ -6,7 +6,11 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "cli": "node src/cli.js"
+    "cli": "node src/cli.js",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.3.0",
@@ -14,6 +18,70 @@
     "puppeteer-core": "^25.16.0"
   },
   "devDependencies": {
-    "electron": "^45.2.3"
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  },
+  "author": "Tommaso Dognini",
+  "build": {
+    "appId": "it.polirec.app",
+    "productName": "PoliRec",
+    "copyright": "MIT \u2014 built on PoliWebex (sup3rgiu) and the PoliNetwork community",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "python/**/*",
+      "package.json",
+      "LICENSE",
+      "NOTICE.md",
+      "!**/*.map"
+    ],
+    "asarUnpack": [
+      "python/**",
+      "node_modules/ffmpeg-static/**"
+    ],
+    "mac": {
+      "category": "public.app-category.education",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": null
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "category": "Education",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    }
   }
 }

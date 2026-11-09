@@ -122,7 +122,7 @@ async function install(rec, { onStep = () => { }, onLog = () => { } } = {}) {
 
     // 3. model download (warm-up run on 1 s of silence)
     step('model', 'running', `Scarico il modello ${rec.model}…`);
-    const script = path.join(__dirname, '..', '..', 'python', 'transcribe_cli.py');
+    const script = require('./transcriber').SCRIPT;
     await run(py, [script, '--warmup', '--engine', rec.engine, '--model', rec.model, ...(rec.cuda ? ['--device', 'cuda'] : [])], { onLine: onLog });
     step('model', 'done', rec.model);
 

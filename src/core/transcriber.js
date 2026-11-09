@@ -6,7 +6,8 @@ const path = require('path');
 const fs = require('fs');
 const readline = require('readline');
 
-const SCRIPT = path.join(__dirname, '..', '..', 'python', 'transcribe_cli.py');
+// inside a packaged app the script lives in app.asar.unpacked (external Python can't read asar archives)
+const SCRIPT = path.join(__dirname, '..', '..', 'python', 'transcribe_cli.py').replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep);
 
 class Transcriber {
     constructor({ emit = () => { } } = {}) {
