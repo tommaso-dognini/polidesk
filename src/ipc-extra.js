@@ -24,14 +24,7 @@ const pkg = require('../package.json');
 let hwCache = null;
 
 /** The configured AI CLI, or the first one installed (works on any machine). */
-function pickProvider(settings) {
-    const av = ai.available();
-    const want = settings.ai && settings.ai.provider;
-    if (want && av[want] && av[want].path) return want;
-    const first = ['agy', 'claude', 'gemini'].find(k => av[k] && av[k].path);
-    if (!first) throw new Error('Nessuno strumento AI installato: installa Antigravity CLI, Claude Code o Gemini CLI e sceglilo in Impostazioni → AI');
-    return first;
-}
+function pickProvider(settings) { return ai.pick(settings); }
 function hardware() {
     if (!hwCache) {
         const hw = setup.detect();
@@ -147,6 +140,27 @@ function register({ handle, send, cfg, findCourse, getSession, closeSession, isS
         notes.setLinks(dir, f, links);
         onNotesChanged(scope);
         return f;
+    });
+    handle('assistant:info', async () => {
+        const exe = process.execPath, root = app.getAppPath();
+        const mcp = path.join(root, 'src', 'mcp.js'), cli = path.join(root, 'src', 'cli.js');
+        const env = { ELECTRON_RUN_AS_NODE: '1' };
+        const q = s => /[\s&()'"]/.test(s) ? `"${s}"` : s;
+        const claudeBin = ai.available().claude && ai.available().claude.path;
+        return {
+            enabled: !!(cfg().settings.integrations || {}).assistant, claudeInstalled: !!claudeBin,
+            claudeCode: `claude mcp add polirec --scope user -e ELECTRON_RUN_AS_NODE=1 -- ${q(exe)} ${q(mcp)}`,
+            json: JSON.stringify({ mcpServers: { polirec: { command: exe, args: [mcp], env } } }, null, 2),
+            cli: process.platform === 'win32' ? `set ELECTRON_RUN_AS_NODE=1 && ${q(exe)} ${q(cli)} help` : `alias polirec='ELECTRON_RUN_AS_NODE=1 ${q(exe)} ${q(cli)}'`,
+            tools: 23,
+        };
+    });
+    handle('assistant:addClaude', async () => {
+        const bin = ai.available().claude && ai.available().claude.path;
+        if (!bin) throw new Error('Claude Code non è installato');
+        const { execFile } = require('child_process');
+        const args = ['mcp', 'add', 'polirec', '--scope', 'user', '-e', 'ELECTRON_RUN_AS_NODE=1', '--', process.execPath, path.join(app.getAppPath(), 'src', 'mcp.js')];
+        return new Promise((res, rej) => execFile(bin, args, { env: require('./core/downloader').toolEnv() }, (e, out, err) => e ? rej(new Error((err || e.message).trim().slice(-300))) : res(out.trim())));
     });
     handle('clipboard:write', async text => { require('electron').clipboard.writeText(String(text || '')); return true; });
     // ── ask a question about ONE lesson (transcript as context), streamed ──

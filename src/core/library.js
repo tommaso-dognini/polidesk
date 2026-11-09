@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
     ui: { theme: 'normal', font: 'system', appearance: 'auto' },
     setupDone: false,
     cloud: { enabled: false, provider: '', path: '', lastPulled: '', lastPushed: '' },
-    integrations: { notion: false, notionToken: '', notionParent: '', applenotes: false, goodnotes: false, notability: false, obsidian: false },
+    integrations: { notion: false, notionToken: '', notionParent: '', applenotes: false, goodnotes: false, notability: false, obsidian: false, assistant: false },
     defaultRoot: '',
     polimiEmail: '',
 };
@@ -167,9 +167,33 @@ function withFileStatus(courseDir, manifest) {
     return recs.sort((a, b) => (a.isoDate || '').localeCompare(b.isoDate || ''));
 }
 
+/** Distinct teachers of a course's recordings: [{ name, count }] (more than one = parallel lecture tracks). */
+function teachersOf(manifest) {
+    const by = {};
+    for (const r of Object.values(manifest.recordings || {})) if (r.teacher) by[r.teacher] = (by[r.teacher] || 0) + 1;
+    return Object.entries(by).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+}
+/** Is this recording wanted given the followed teachers? (no choice / no teacher info → yes) */
+const followed = (teachers, r) => !Array.isArray(teachers) || !teachers.length || !r.teacher || teachers.includes(r.teacher);
+
+/** Files (video, transcripts incl. originals, AI notes) of lessons by teachers NOT in `teachers`. */
+function unfollowedFiles(courseDir, manifest, teachers) {
+    const d = courseDirs(courseDir);
+    const out = [];
+    for (const r of withFileStatus(courseDir, manifest)) {
+        if (followed(teachers, r) || !r.file) continue;
+        const stem = r.file.replace(/\.mp4$/i, '');
+        const cands = [path.join(d.video, r.file), path.join(d.video, r.file + '.part')];
+        for (const ext of ['txt', 'srt', 'vtt', 'json']) { cands.push(path.join(d.transcripts, `${stem}.${ext}`)); cands.push(path.join(d.transcripts, '.orig', `${stem}.${ext}`)); }
+        for (const n of r.notes) cands.push(path.join(d.notes, n));
+        for (const f of cands) if (fs.existsSync(f)) out.push(f);
+    }
+    return out;
+}
+
 function writeIndex(courseDir, manifest) {
     const d = courseDirs(courseDir);
-    const recs = withFileStatus(courseDir, manifest);
+    const recs = withFileStatus(courseDir, manifest).filter(r => followed(manifest.teachers, r));
     fs.mkdirSync(d.root, { recursive: true });
     // HTML overview (cards with summaries + quick links)
     fs.writeFileSync(path.join(d.root, 'INDICE.html'), require('./indexpage').render({ course: manifest.course, recs, dirs: d, DIRS }));
@@ -194,4 +218,4 @@ function writeIndex(courseDir, manifest) {
     fs.writeFileSync(d.index, md);
 }
 
-module.exports = { DEFAULT_SETTINGS, DIRS, loadConfig, saveConfig, patchCourse, courseDirs, loadManifest, saveManifest, assignFilename, baseName, prettyTopic, teacherFrom, sanitize, writeIndex, fileStatus, withFileStatus };
+module.exports = { teachersOf, followed, unfollowedFiles, DEFAULT_SETTINGS, DIRS, loadConfig, saveConfig, patchCourse, courseDirs, loadManifest, saveManifest, assignFilename, baseName, prettyTopic, teacherFrom, sanitize, writeIndex, fileStatus, withFileStatus };

@@ -37,6 +37,8 @@ linkati nella pagina *Community*: senza licenza il loro codice non può essere r
 | [CodeMirror 6](https://codemirror.net/) | MIT |
 | [@codemirror/merge](https://github.com/codemirror/merge) | MIT (revisione inline delle modifiche proposte dall'AI) |
 | [markdown-it](https://github.com/markdown-it/markdown-it) | MIT |
+| [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | MIT (server MCP per gli assistenti AI) |
+| [zod](https://zod.dev) | MIT |
 | [Leaflet](https://leafletjs.com/) | BSD-2-Clause (`src/renderer/vendor/leaflet/LICENSE`) — mappa delle aule; forme degli edifici e foto delle aule dalle API pubbliche del Politecnico, nessuna tile di terze parti |
 | [KaTeX](https://katex.org/) (codice e font) | MIT |
 | [luxon](https://moment.github.io/luxon/), [uuid](https://github.com/uuidjs/uuid) | MIT |

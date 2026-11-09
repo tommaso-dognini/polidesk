@@ -132,4 +132,14 @@ async function generateNote({ provider, model, template, transcriptPath, notesDi
     return name;
 }
 
-module.exports = { PROVIDERS, TEMPLATES, available, runPrompt, runAgent, generateNote };
+/** Provider to use: the one chosen in settings if installed, otherwise the first installed one. */
+function pick(settings) {
+    const av = available();
+    const want = settings.ai && settings.ai.provider;
+    if (want && av[want] && av[want].path) return want;
+    const first = ['agy', 'claude', 'gemini'].find(k => av[k] && av[k].path);
+    if (!first) throw new Error('Nessuno strumento AI installato: installa Antigravity CLI, Claude Code o Gemini CLI e sceglilo in Impostazioni → AI');
+    return first;
+}
+
+module.exports = { pick, PROVIDERS, TEMPLATES, available, runPrompt, runAgent, generateNote };

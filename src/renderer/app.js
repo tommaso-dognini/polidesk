@@ -171,7 +171,9 @@ function viewCourse(v) {
             <button id="c-agent">🤖 Agente AI</button>
             <button id="c-sync" class="${isRun ? '' : 'primary'}">${isRun ? '■ Ferma' : '⟳ Sincronizza'}</button></div>
         <div class="tabs">${[['panoramica', 'Panoramica'], ['lezioni', 'Lezioni'], ['materiale', 'Materiale'], ['note', 'Note AI'], ['impostazioni', 'Impostazioni']].map(([k, l]) => `<button data-tab="${k}" class="${tab === k ? 'active' : ''}">${l}</button>`).join('')}</div>
+        ${needsTeacherChoice(c) ? `<div class="banner tch-banner">👥 Questo corso ha le registrazioni di più docenti (${courseTeachers(c).map(t => esc(t.name)).join(', ')}). Scegli quale segui prima di scaricarle. <button class="small primary" id="c-tch">Scegli docente…</button></div>` : ''}
         <div id="tab"></div></div>`;
+    if ($('#c-tch', v)) { $('#c-tch', v).onclick = () => askTeachers(c); askTeachers(c, { auto: true }); }
     $('[data-go]', v).onclick = () => go({ name: 'dashboard' });
     $$('[data-tab]', v).forEach(b => b.onclick = () => go({ ...route, tab: b.dataset.tab }));
     $('#c-sync', v).onclick = () => guard(() => isRun ? api.stopSync() : api.sync([c.id]));
@@ -181,9 +183,51 @@ function viewCourse(v) {
     ({ panoramica: window.tabOverview, lezioni: tabLessons, materiale: tabMaterials, note: tabNotes, impostazioni: tabCourseSettings })[tab](c, $('#tab', v));
 }
 
-const lessonFilter = { q: '', f: 'all' };
+const lessonFilter = { q: '', f: 'all', allTeachers: false };
+// ── parallel lecture tracks (same course, different teachers) ──
+function courseTeachers(c) {
+    const by = {};
+    for (const r of c.recordings) if (r.teacher) by[r.teacher] = (by[r.teacher] || 0) + 1;
+    return Object.entries(by).map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+}
+const isFollowed = (c, r) => !Array.isArray(c.teachers) || !c.teachers.length || !r.teacher || c.teachers.includes(r.teacher);
+const needsTeacherChoice = c => courseTeachers(c).length > 1 && !Array.isArray(c.teachers);
+let teacherAsked = new Set();
+async function askTeachers(c, { auto } = {}) {
+    if (auto && (teacherAsked.has(c.id) || $('#modal-root').innerHTML)) return;
+    teacherAsked.add(c.id);
+    const ts = courseTeachers(c);
+    if (ts.length < 2) return toast('Questo corso ha un solo docente');
+    const cur = Array.isArray(c.teachers) ? c.teachers : [];
+    const m = modal(`<h2>Quale docente segui?</h2>
+        <p class="muted" style="margin-top:0"><b>${esc(cname(c))}</b> ha le registrazioni di ${ts.length} docenti (lezioni parallele sugli stessi argomenti). Scegli quali scaricare: puoi selezionarne anche più di uno e cambiare idea in Impostazioni del corso.</p>
+        <div class="tch-list">${ts.map(t => `<label class="tch"><input type="checkbox" value="${esc(t.name)}" ${cur.includes(t.name) ? 'checked' : ''}><b>${esc(t.name)}</b><span class="faint">${t.count} registrazioni · ${c.recordings.filter(r => r.teacher === t.name && r.videoExists).length} già scaricate</span></label>`).join('')}</div>
+        <div id="tch-trash" class="tch-trash hidden"><label class="row"><input type="checkbox" id="tch-del"> <span>Sposta nel Cestino i file già scaricati dei docenti non selezionati <span class="faint" id="tch-size"></span></span></label></div>
+        <div class="foot"><button class="ghost" id="tch-no">Più tardi</button><button class="primary" id="tch-ok">Salva e scarica</button></div>`);
+    const sel = () => $$('.tch input', m.el).filter(i => i.checked).map(i => i.value);
+    const upd = () => {
+        const s = sel(); $('#tch-ok', m.el).disabled = !s.length;
+        const drop = c.recordings.filter(r => r.teacher && !s.includes(r.teacher) && (r.videoExists || r.transcript));
+        $('#tch-trash', m.el).classList.toggle('hidden', !s.length || !drop.length);
+        $('#tch-size', m.el).textContent = drop.length ? `(${drop.length} lezioni: video, trascrizioni e note AI — recuperabili dal Cestino)` : '';
+    };
+    $$('.tch input', m.el).forEach(i => i.onchange = upd); upd();
+    $('#tch-no', m.el).onclick = m.close;
+    $('#tch-ok', m.el).onclick = () => guard(async () => {
+        const s = sel(); const del = $('#tch-del', m.el).checked && !$('#tch-trash', m.el).classList.contains('hidden');
+        m.close();
+        await api.updateCourse(c.id, { teachers: s });
+        if (del) { const r = await api.trashUnfollowed(c.id); toast(`${r.trashed} file spostati nel Cestino`); }
+        toast(`Segui: ${s.join(' e ')}`);
+        $('#view').dataset.view = ''; await refresh();
+        if (c.recordings.some(r => s.includes(r.teacher) && !r.videoExists)) api.sync([c.id]);
+    });
+}
+
 function tabLessons(c, el) {
-    const recs = c.recordings.slice().sort((a, b) => (b.isoDate || '').localeCompare(a.isoDate || ''));
+    const multi = courseTeachers(c).length > 1 && Array.isArray(c.teachers) && c.teachers.length;
+    const hiddenN = multi ? c.recordings.filter(r => !isFollowed(c, r)).length : 0;
+    const recs = c.recordings.filter(r => lessonFilter.allTeachers || isFollowed(c, r)).sort((a, b) => (b.isoDate || '').localeCompare(a.isoDate || ''));
     if (!recs.length) {
         el.innerHTML = `<div class="empty-state"><h2>Nessuna registrazione</h2><p>${c.lastSync ? 'Il corso non ha registrazioni pubblicate (o non sono state trovate). Puoi aggiungere un link nelle Impostazioni del corso.' : 'Premi Sincronizza per cercare le registrazioni del corso.'}</p></div>`;
         return;
@@ -193,6 +237,7 @@ function tabLessons(c, el) {
         <input class="search" id="l-q" placeholder="Cerca per argomento, docente, parola chiave…" value="${esc(lessonFilter.q)}">
         <div class="seg">${[['all', 'Tutte'], ['dl', 'Scaricate'], ['todo', 'Da scaricare'], ['nt', 'Da trascrivere']].map(([k, l]) => `<button data-f="${k}" class="${lessonFilter.f === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <span class="grow"></span>
+        ${multi ? `<button class="chip ${lessonFilter.allTeachers ? 'on' : ''}" id="l-tch" title="Lezioni parallele di altri docenti">👥 ${esc(c.teachers.join(' + '))}${hiddenN ? ` · ${lessonFilter.allTeachers ? 'mostra solo i miei' : `+${hiddenN} altri`}` : ''}</button>` : ''}
         ${pending ? `<button id="l-tr">🎙 Trascrivi ${pending}</button>` : ''}
         <button class="ghost" id="l-more">⋯ Altro</button>
     </div>
@@ -224,6 +269,7 @@ function tabLessons(c, el) {
     draw();
     api.notes.linkCounts(c.id).then(x => { counts = x || {}; if (Object.keys(counts).length) draw(); }).catch(() => { });
     $('#l-q', el).oninput = e => { lessonFilter.q = e.target.value; draw(); };
+    if ($('#l-tch', el)) $('#l-tch', el).onclick = () => { if (!hiddenN) return askTeachers(c); lessonFilter.allTeachers = !lessonFilter.allTeachers; tabLessons(c, el); };
     $$('[data-f]', el).forEach(b => b.onclick = () => { lessonFilter.f = b.dataset.f; tabLessons(c, el); });
     if ($('#l-tr', el)) $('#l-tr', el).onclick = () => guard(async () => { const k = await api.transcribe(c.id); toast(`${k} lezioni in coda per la trascrizione`); refresh(); });
     $('#l-more', el).onclick = e => showMenu(e.clientX - 240, e.clientY + 10, [
@@ -307,11 +353,13 @@ function tabCourseSettings(c, el) {
         ${field('Scarica il materiale', 'Slide, PDF e cartelle del corso in materiale/', sw('cs-mat', !!c.materials))}
         ${field('Link extra', 'Uno per riga: archivi RecMan, link WebEx, mp4 o YouTube non trovati automaticamente', `<textarea id="cs-extra" rows="3">${esc((c.extraUrls || []).join('\n'))}</textarea>`)}
         ${field('Password video', 'Se il docente protegge le registrazioni WebEx', `<input id="cs-pwd" value="${esc(c.videoPassword || '')}">`)}
+        ${courseTeachers(c).length > 1 ? field('Docenti seguiti', 'Il corso ha lezioni parallele di più docenti: si scaricano solo quelle dei docenti scelti', `<span class="pill ${Array.isArray(c.teachers) ? 'ok' : 'warn'}">${Array.isArray(c.teachers) ? esc(c.teachers.join(', ')) : 'da scegliere'}</span><span class="grow"></span><button id="cs-tch">Cambia…</button>`) : ''}
     </div>
     <div class="group"><h3>Sorgenti trovate</h3>
         ${(c.manifest.sources || []).map(s => field(`<span class="pill">${esc(s.type)}</span>`, '', `<span class="muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.url)}">${esc(s.label || s.url)}</span>`)).join('') || field('—', 'Nessuna sorgente: sincronizza il corso', '')}
     </div>
     <div class="row"><button class="danger" id="cs-del">Rimuovi corso</button><span class="faint">I file scaricati non vengono cancellati.</span><span class="grow"></span><button class="primary" id="cs-save">Salva</button></div>`;
+    if ($('#cs-tch', el)) $('#cs-tch', el).onclick = () => askTeachers(c);
     $('#cs-pick', el).onclick = async () => { const d = await api.pickDir($('#cs-dir', el).value); if (d) $('#cs-dir', el).value = d; };
     $('#cs-save', el).onclick = () => guard(async () => {
         const patch = {
@@ -943,6 +991,7 @@ api.on(e => {
         case 'setup-step': { const st = $('#st-' + e.step); if (st) { $('.s', st).innerHTML = e.status === 'done' ? '<span style="color:var(--ok)">✓</span>' : '<span class="spin"></span>'; $('.d', st).textContent = e.detail; } break; }
         case 'setup-log': { const l = $('#su-log'); if (l) { l.textContent += e.line + '\n'; l.scrollTop = 1e9; } break; }
         case 'refresh': softRefresh(); break;
+        case 'teacher-choice': refresh().then(() => { const c = course(e.course); if (c) { teacherAsked.delete(c.id); askTeachers(c, { auto: true }); } }); break;
     }
 });
 

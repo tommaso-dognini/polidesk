@@ -640,7 +640,7 @@ window.settingsExtra = async v => {
     recBadge('#s-model', hw.rec.model, () => $('#s-model', v).value = hw.rec.model);
 
     const engines = await api.notes.engines();
-    const [clouds, apps, searchSt] = await Promise.all([api.cloud.detect(), api.integrations.apps(), api.search.status()]);
+    const [clouds, apps, searchSt, assist] = await Promise.all([api.cloud.detect(), api.integrations.apps(), api.search.status(), api.assistant.info()]);
     const integ = (key, name, desc, detected) => field(name, desc + (detected === undefined || detected ? '' : ` <span class="pill warn">non rilevata su questo computer</span>`), sw('x-int-' + key, !!(s.integrations || {})[key]));
     const av = S.tools.ai, cur = s.ai.provider;
     const providerWarn = av[cur] && av[cur].path ? '' : field('Strumento AI', '', `<span class="pill err">${esc((av[cur] || {}).label || cur)} non è installato su questo computer</span><span class="faint">${Object.values(av).some(x => x.path) ? 'verrà usato ' + esc(Object.values(av).find(x => x.path).label) : 'installa Antigravity CLI, Claude Code o Gemini CLI'}</span>`);
@@ -684,6 +684,15 @@ window.settingsExtra = async v => {
         ${integ('notability', 'Notability', 'Esporta il PDF e lo apre in Notability.', apps.notability)}
         ${integ('obsidian', 'Obsidian', 'Apre l\'appunto in Obsidian. Usa come vault la cartella degli appunti (o la cartella cloud).', apps.obsidian)}
     </div>
+    <div class="group"><h3>Assistenti AI e automazioni</h3>
+        ${field('Assistenti AI (MCP)', 'Permette a Claude Code, Claude Desktop o altri assistenti compatibili MCP di usare PoliRec: leggere lezioni, trascrizioni e note, cercare, creare appunti e attività, vedere orario e aule libere.', sw('x-mcp', !!it.assistant))}
+        <div id="x-mcp-cfg" class="${it.assistant ? '' : 'hidden'}">
+            ${field('Claude Code', assist.claudeInstalled ? 'Registra PoliRec come server MCP per tutti i tuoi progetti' : 'Esegui il comando nel terminale dopo aver installato Claude Code', `${assist.claudeInstalled ? '<button class="primary" id="x-mcp-add">Aggiungi a Claude Code</button>' : ''}<button id="x-mcp-cc">⧉ Copia comando</button>`)}
+            ${field('Claude Desktop e altri', 'Incolla in claude_desktop_config.json (o nella configurazione MCP del tuo assistente)', '<button id="x-mcp-json">⧉ Copia JSON</button>')}
+            ${field('Riga di comando', 'Per i tuoi script: polirec lessons, transcript, search, ask, notes, todo, rooms… (--json per l\'output strutturato)', '<button id="x-cli">⧉ Copia alias</button>')}
+            <pre class="mcp-snip">${esc(assist.claudeCode)}</pre>
+        </div>
+    </div>
     <div class="group"><h3>Informazioni</h3>
         ${field(`${esc(about.name)} ${esc(about.version)}`, `Electron ${esc(about.electron)} · ${esc(about.platform)} · dati in ${esc(about.dataDir)}`, '<button id="x-upd">Controlla aggiornamenti</button>')}
         ${field('Gratis e open source', 'PoliRec è gratuito per tutti gli studenti. Se ti è utile, puoi offrire un caffè allo sviluppatore ☕', about.donateUrl ? '<button class="primary" id="x-coffee">☕ Buy me a coffee</button>' : '<span class="faint">link donazioni non configurato</span>')}
@@ -716,6 +725,13 @@ window.settingsExtra = async v => {
     ['notion', 'applenotes', 'goodnotes', 'notability', 'obsidian'].forEach(k => $('#x-int-' + k, box).onchange = () => { if (k === 'notion') $('#x-notion-cfg', box).classList.toggle('hidden', !$('#x-int-notion', box).checked); saveIt(); });
     $('#x-nt', box).onchange = saveIt; $('#x-np', box).onchange = saveIt;
     $('#x-ntest', box).onclick = () => guard(async () => { await saveIt(); const t = await api.integrations.testNotion($('#x-nt', box).value.trim(), $('#x-np', box).value.trim()); toast(`Notion collegato ✓ (pagina «${t}»)`, 4000); });
+    // assistants (MCP) + CLI
+    $('#x-mcp', box).onchange = e => guard(async () => { await saveX({ integrations: { ...(S.settings.integrations || {}), assistant: e.target.checked } }); $('#x-mcp-cfg', box).classList.toggle('hidden', !e.target.checked); });
+    const cp = (id, txt, msg) => { const b = $(id, box); if (b) b.onclick = () => guard(async () => { await api.copy(txt); toast(msg); }); };
+    cp('#x-mcp-cc', assist.claudeCode, 'Comando copiato: incollalo nel terminale');
+    cp('#x-mcp-json', assist.json, 'Configurazione JSON copiata');
+    cp('#x-cli', assist.cli, 'Alias copiato: aggiungilo a ~/.zshrc o ~/.bashrc');
+    if ($('#x-mcp-add', box)) $('#x-mcp-add', box).onclick = () => guard(async () => { await api.assistant.addClaude(); toast('PoliRec aggiunto a Claude Code ✓ — prova a chiedere «quali lezioni ho questa settimana?»', 6000); });
     // AI
     $('#x-ai-page', box).onchange = e => saveX({ ai: { ...S.settings.ai, autoCoursePage: e.target.checked } });
     if ($('#x-idx', box)) $('#x-idx', box).onclick = () => guard(async () => { $('#x-idx', box).disabled = true; $('#x-idx', box).textContent = 'Indicizzo…'; await api.search.index(); toast('Indice aggiornato'); window.settingsExtra(v); });

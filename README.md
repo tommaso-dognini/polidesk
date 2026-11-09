@@ -108,3 +108,18 @@ node scripts/discover-all.js out.json      # verifica in sola lettura su tutti i
 ```
 
 Dati e configurazione in `~/.polirec/`; in caso di problemi, screenshot e HTML delle pagine sono in `~/.polirec/debug/`.
+
+## Usare PoliRec da Claude o da altri assistenti (MCP) e dalla riga di comando
+
+Attiva **Impostazioni → Assistenti AI e automazioni → Assistenti AI (MCP)**. Poi:
+
+- **Claude Code**: premi «Aggiungi a Claude Code» (oppure copia il comando `claude mcp add polirec …`).
+- **Claude Desktop / altri client MCP**: «Copia JSON» e incollalo nella loro configurazione MCP.
+- **Script e terminale**: «Copia alias» e usa `polirec lessons <corso>`, `polirec transcript <corso> <lezione>`,
+  `polirec search "…"`, `polirec ask "…"`, `polirec notes`, `polirec new-note`, `polirec todo`, `polirec timetable`,
+  `polirec rooms`… (`--json` per l'output strutturato).
+
+Il server MCP (`src/mcp.js`) espone 23 strumenti: corsi e lezioni, trascrizioni (a pezzi), note AI (lettura e generazione),
+ricerca semantica e domande con citazioni, appunti (crea/modifica/collega a lezioni), attività, orario, aule libere,
+sincronizzazione e trascrizione. Usa il runtime dell'app (`ELECTRON_RUN_AS_NODE=1`), quindi non serve installare Node.js.
+CLI e MCP condividono `src/core/api.js` e leggono/scrivono gli stessi dati dell'app, in modo sicuro anche ad app aperta.

@@ -715,3 +715,15 @@ html[data-theme="developer"] .study { border: 1px solid var(--line); }
 .ed-meta > span:not(.ed-links) { white-space: nowrap; }
 .ed-links { flex-wrap: wrap; min-width: 0; }
 .ed-links .lchip { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+
+/* scelta del docente (lezioni parallele) */
+.tch-list { display: grid; gap: 8px; margin: 14px 0; }
+.tch { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line-strong); cursor: pointer; }
+.tch:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.tch input { width: auto; margin: 0; grid-row: span 2; }
+.tch .faint { font-size: .85em; }
+.tch-trash { padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.tch-trash input { width: auto; }
+.tch-banner { margin: 0 0 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.mcp-snip { margin: 4px 18px 12px; padding: 10px 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font-size: .78em; white-space: pre-wrap; word-break: break-all; color: var(--muted); }

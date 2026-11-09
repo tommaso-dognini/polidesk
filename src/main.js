@@ -314,7 +314,25 @@ handle('course:add', async ({ input, dir, name, materials, language }) => {
     const all = cfg(); all.courses.push(c); lib.saveConfig(all);
     return courseView(c);
 });
-handle('course:update', async ({ id, patch }) => { patchCourse(id, patch); return courseView(findCourse(id)); });
+handle('course:update', async ({ id, patch }) => {
+    patchCourse(id, patch);
+    const c = findCourse(id);
+    if ('teachers' in patch) { try { const m = lib.loadManifest(c.dir); m.teachers = patch.teachers; lib.saveManifest(c.dir, m); lib.writeIndex(c.dir, m); } catch (e) { } scheduleIndex(id, 5000); }
+    return courseView(c);
+});
+handle('course:teachers', async id => lib.teachersOf(lib.loadManifest(findCourse(id).dir)));
+// Move to the Trash (recoverable) video, transcripts and AI notes of lessons by teachers the student does not follow
+handle('course:trashUnfollowed', async ({ id, dryRun }) => {
+    const c = findCourse(id);
+    if (!Array.isArray(c.teachers) || !c.teachers.length) throw new Error('Scegli prima quali docenti segui');
+    const files = lib.unfollowedFiles(c.dir, lib.loadManifest(c.dir), c.teachers);
+    if (dryRun) return { files: files.length, bytes: files.reduce((a, f) => a + (fs.statSync(f).size || 0), 0) };
+    let n = 0;
+    for (const f of files) { try { await shell.trashItem(f); n++; } catch (e) { log('✗ cestino: ' + e.message, id); } }
+    lib.writeIndex(c.dir, lib.loadManifest(c.dir));
+    send({ type: 'refresh' });
+    return { trashed: n };
+});
 handle('course:remove', async id => { const all = cfg(); all.courses = all.courses.filter(c => c.id !== id); all.deletedCourses = [...new Set([...(all.deletedCourses || []), id])]; lib.saveConfig(all); return true; });
 handle('course:reorder', async ids => {
     const all = cfg();

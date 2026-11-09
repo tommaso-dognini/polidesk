@@ -105,6 +105,19 @@ async function syncCourse(session, course, opts = {}) {
     lib.writeIndex(course.dir, manifest);
 
     let todo = found.map(f => manifest.recordings[f.key]).filter((r, i, a) => r.status !== 'downloaded' && !r.ignored && a.indexOf(r) === i);
+    // same course taught by several teachers (parallel tracks): ask which one(s) the student follows
+    const teachers = lib.teachersOf(manifest);
+    if (teachers.length > 1) {
+        if (!Array.isArray(course.teachers)) {
+            const before = todo.length;
+            todo = todo.filter(r => !r.teacher);
+            log(`👥 Registrazioni di ${teachers.length} docenti (${teachers.map(t => `${t.name}: ${t.count}`).join(', ')}): scegli quale segui prima di scaricarle${before - todo.length ? ` (${before - todo.length} in attesa)` : ''}`);
+            emit({ type: 'teacher-choice', course: course.id, teachers });
+        } else {
+            todo = todo.filter(r => lib.followed(course.teachers, r));
+            if (JSON.stringify(manifest.teachers) !== JSON.stringify(course.teachers)) { manifest.teachers = course.teachers; save(); lib.writeIndex(course.dir, manifest); }
+        }
+    }
     // newest first, so a limited/interrupted sync always gets the latest lessons
     todo.sort((a, b) => (b.isoDate || '').localeCompare(a.isoDate || ''));
     if (opts.limit) todo = todo.slice(0, opts.limit);
