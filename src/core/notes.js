@@ -64,12 +64,16 @@ function write(dir, rel, content) { const p = safe(dir, rel); fs.mkdirSync(path.
 function rename(dir, rel, newName) {
     const from = safe(dir, rel), to = safe(dir, path.join(path.dirname(rel), newName.replace(/[\\/:*?"<>|]/g, '-') + path.extname(rel)));
     if (fs.existsSync(to)) throw new Error('esiste già un appunto con questo nome');
-    fs.renameSync(from, to); return path.relative(dir, to).split(path.sep).join('/');
+    fs.renameSync(from, to);
+    const nrel = path.relative(dir, to).split(path.sep).join('/');
+    moveLinks(dir, rel, nrel);
+    return nrel;
 }
 function remove(dir, rel) {
     const p = safe(dir, rel), trash = path.join(dir, '.cestino');
     fs.mkdirSync(trash, { recursive: true });
     fs.renameSync(p, path.join(trash, `${Date.now()}-${path.basename(p)}`));
+    moveLinks(dir, rel, null);
     return true;
 }
 /** Save a pasted/dropped image next to the note (assets/) and return its relative path. */
@@ -80,6 +84,25 @@ function saveAsset(dir, rel, name, buf) {
     fs.writeFileSync(path.join(assets, fname), Buffer.from(buf));
     return 'assets/' + fname;
 }
+
+// ---------- links note ↔ lessons (sidecar .polirec-links.json in each notes folder) ----------
+// { "<file>": [{ "c": courseId, "k": recordingKey }, ...] } — works for .md, .tex and .typ alike.
+const LINKS = '.polirec-links.json';
+function getAllLinks(dir) { try { return JSON.parse(fs.readFileSync(path.join(dir, LINKS), 'utf8')) || {}; } catch (e) { return {}; } }
+function saveAllLinks(dir, all) {
+    for (const k of Object.keys(all)) if (!all[k] || !all[k].length) delete all[k];
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp = path.join(dir, LINKS + '.tmp'); fs.writeFileSync(tmp, JSON.stringify(all, null, 1)); fs.renameSync(tmp, path.join(dir, LINKS));
+}
+const getLinks = (dir, file) => getAllLinks(dir)[file] || [];
+function setLinks(dir, file, links) {
+    const all = getAllLinks(dir);
+    const seen = new Set();
+    all[file] = (links || []).filter(l => l && l.c && l.k && !seen.has(l.c + '|' + l.k) && seen.add(l.c + '|' + l.k)).map(l => ({ c: l.c, k: l.k }));
+    saveAllLinks(dir, all);
+    return all[file] || [];
+}
+function moveLinks(dir, from, to) { const all = getAllLinks(dir); if (!all[from]) return; if (to) all[to] = all[from]; delete all[from]; saveAllLinks(dir, all); }
 
 // ---------- engines ----------
 const engineBin = name => path.join(BIN, name + (IS_WIN ? '.exe' : ''));
@@ -164,4 +187,4 @@ function parseErrors(kind, log) {
     return errs;
 }
 
-module.exports = { EXT, KIND_BY_EXT, dirFor, list, create, read, write, rename, remove, saveAsset, engineStatus, installEngine, compile };
+module.exports = { getLinks, setLinks, getAllLinks, EXT, KIND_BY_EXT, dirFor, list, create, read, write, rename, remove, saveAsset, engineStatus, installEngine, compile };

@@ -11,7 +11,7 @@ const progress = {};                            // recording key -> {percent, sp
 const tprog = {};                               // video path -> 'queued' | number | {error}
 const running = new Set();                      // course ids syncing
 let player = null;                              // current <video> (recording page)
-let aiStream = null;                            // element receiving streamed AI output
+let aiStream = null, aiJob = null;                            // element receiving streamed AI output
 
 // ───────── helpers ─────────
 function toast(msg, ms = 3200) {
@@ -38,6 +38,7 @@ const fmtT = s => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s 
 const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : '';
 
 function md(src) {
+    if (window.PoliEditor && PoliEditor.renderMarkdown) { try { return PoliEditor.renderMarkdown(String(src || '')); } catch (e) { } }
     const out = []; let list = false, code = false;
     const inline = s => s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>').replace(/`([^`]+)`/g, '<code>$1</code>');
     for (const l of esc(src).split('\n')) {
@@ -189,51 +190,73 @@ function tabLessons(c, el) {
     }
     const pending = recs.filter(r => r.videoExists && !r.transcript).length;
     el.innerHTML = `<div class="toolbar">
-        <input class="search" id="l-q" placeholder="Cerca lezione…" value="${esc(lessonFilter.q)}">
+        <input class="search" id="l-q" placeholder="Cerca per argomento, docente, parola chiave…" value="${esc(lessonFilter.q)}">
         <div class="seg">${[['all', 'Tutte'], ['dl', 'Scaricate'], ['todo', 'Da scaricare'], ['nt', 'Da trascrivere']].map(([k, l]) => `<button data-f="${k}" class="${lessonFilter.f === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <span class="grow"></span>
         ${pending ? `<button id="l-tr">🎙 Trascrivi ${pending}</button>` : ''}
-        ${recs.some(r => r.transcript) ? '<button id="l-clean" class="ghost" title="Rimuove ehm, mmm, ripetizioni e frasi inventate da Whisper (gli originali restano in trascrizioni/.orig)">🧹 Pulisci testi</button>' : ''}
-        <div class="row"><select id="l-tpl" style="width:auto">${Object.entries(S.templates).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('')}</select><button id="l-notes">✨ Per tutte</button></div>
-    </div><div class="list" id="l-list"></div>`;
+        <button class="ghost" id="l-more">⋯ Altro</button>
+    </div>
+    <div class="lx"><nav class="lx-toc" id="l-toc"></nav><div class="lx-cards" id="l-list"></div></div>`;
+    let counts = {};
+    const n = recs.length;
+    const num = r => n - recs.indexOf(r);           // lesson number, oldest = 1
     const draw = () => {
         const q = lessonFilter.q.toLowerCase();
-        const list = recs.filter(r => (!q || [r.displayTitle, r.teacher, r.type, r.summary].join(' ').toLowerCase().includes(q))
+        const list = recs.filter(r => (!q || [r.displayTitle, r.teacher, r.type, r.summary, (r.bullets || []).join(' ')].join(' ').toLowerCase().includes(q))
             && (lessonFilter.f === 'all' || (lessonFilter.f === 'dl' && r.videoExists) || (lessonFilter.f === 'todo' && !r.videoExists) || (lessonFilter.f === 'nt' && r.videoExists && !r.transcript)));
-        $('#l-list', el).innerHTML = list.map(r => recRow(c, r)).join('') || '<div class="empty-state">Nessun risultato</div>';
-        $$('.rec', el).forEach(row => row.onclick = () => go({ name: 'recording', courseId: c.id, key: row.dataset.key, back: 'lezioni' }));
+        $('#l-toc', el).innerHTML = list.map(r => `<a data-k="${esc(r.key)}"><span>${r.isoDate ? new Date(r.isoDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) : '—'}</span>${esc(r.displayTitle || r.file)}</a>`).join('');
+        $('#l-list', el).innerHTML = list.map(r => lessonCard(c, r, num(r), counts[r.key] || 0)).join('') || '<div class="empty-state">Nessun risultato</div>';
+        $$('#l-toc a', el).forEach(a => a.onclick = () => { const card = $(`.lcard[data-key="${CSS.escape(a.dataset.k)}"]`, el); if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 1200); } });
+        $$('.lcard', el).forEach(card => card.onclick = e => {
+            const b = e.target.closest('[data-act]');
+            const open = extra => go({ name: 'recording', courseId: c.id, key: card.dataset.key, back: 'lezioni', ...extra });
+            if (!b) return open({});
+            e.stopPropagation();
+            const a = b.dataset.act;
+            if (a === 'play') open({ side: 'testo' });
+            else if (a === 'text') open({ side: 'testo' });
+            else if (a === 'notes') open({ side: 'appunti' });
+            else if (a.startsWith('ai:')) open({ study: a.slice(3) });
+            else if (a === 'dl') guard(() => api.sync([c.id]));
+            else if (a === 'tr') guard(async () => { await api.transcribe(c.id, [card.dataset.key]); toast('In coda per la trascrizione'); refresh(); });
+        });
     };
     draw();
+    api.notes.linkCounts(c.id).then(x => { counts = x || {}; if (Object.keys(counts).length) draw(); }).catch(() => { });
     $('#l-q', el).oninput = e => { lessonFilter.q = e.target.value; draw(); };
     $$('[data-f]', el).forEach(b => b.onclick = () => { lessonFilter.f = b.dataset.f; tabLessons(c, el); });
-    if ($('#l-clean', el)) $('#l-clean', el).onclick = () => guard(async () => { const r = await api.cleanTranscripts(c.id); toast(`${r.files} trascrizioni pulite, ${r.removed} segmenti rimossi`); });
-    if ($('#l-tr', el)) $('#l-tr', el).onclick = () => guard(async () => { const n = await api.transcribe(c.id); toast(`${n} lezioni in coda per la trascrizione`); refresh(); });
-    $('#l-notes', el).onclick = () => guard(async () => { const n = await api.notesBatch(c.id, $('#l-tpl', el).value); toast(n ? `Genero note per ${n} lezioni…` : 'Tutte le lezioni trascritte hanno già queste note'); });
+    if ($('#l-tr', el)) $('#l-tr', el).onclick = () => guard(async () => { const k = await api.transcribe(c.id); toast(`${k} lezioni in coda per la trascrizione`); refresh(); });
+    $('#l-more', el).onclick = e => showMenu(e.clientX - 240, e.clientY + 10, [
+        ...Object.entries(S.templates).filter(([k]) => k !== 'sommario').map(([k, l]) => [`✨ ${l.split(' (')[0]} per tutte le lezioni`, async () => { const k2 = await api.notesBatch(c.id, k); toast(k2 ? `Genero per ${k2} lezioni…` : 'Tutte le lezioni trascritte le hanno già'); }]),
+        ['✨ Sommari mancanti', async () => { const k2 = await api.notesBatch(c.id, 'sommario'); toast(k2 ? `Genero ${k2} sommari…` : 'Nessun sommario mancante'); }],
+        '-',
+        ['🧹 Pulisci trascrizioni (ehm, ripetizioni…)', async () => { const r = await api.cleanTranscripts(c.id); toast(`${r.files} trascrizioni pulite, ${r.removed} segmenti rimossi`); }],
+    ]);
 }
 
-function recStatus(c, r) {
-    const p = progress[r.key], tp = tprog[vpath(c, r)];
-    const parts = [];
-    if (r.videoExists) parts.push('<span class="pill ok">✓ video</span>');
-    else if (p && r.status !== 'error') parts.push(`<span class="pill acc">⬇ ${Math.round(p.percent || 0)}%</span>`);
-    else if (r.status === 'error') parts.push(`<span class="pill err" title="${esc(r.error)}">✗ errore</span>`);
-    else parts.push('<span class="pill">da scaricare</span>');
-    if (r.transcript) parts.push('<span class="pill ok">✓ testo</span>');
-    else if (tp === 'queued') parts.push('<span class="pill">🎙 in coda</span>');
-    else if (typeof tp === 'number') parts.push(`<span class="pill acc">🎙 ${tp}%</span>`);
-    else if (tp && tp.error) parts.push(`<span class="pill err" title="${esc(tp.error)}">🎙 errore</span>`);
-    const n = r.notes.filter(x => !/ - sommario\.md$/.test(x)).length;
-    if (n) parts.push(`<span class="pill">📝 ${n}</span>`);
-    return parts.join('');
-}
-function recRow(c, r) {
+const AI_KIND = { appunti: '📝 Appunti', riassunto: '📄 Riassunto', spiegazione: '💡 Spiegazione', flashcard: '🃏 Flashcard', domande: '❓ Domande' };
+function lessonCard(c, r, num, linked) {
     const d = r.isoDate ? new Date(r.isoDate) : null;
-    return `<div class="rec" data-key="${esc(r.key)}">
-        <div class="d"><b>${d ? d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : '—'}</b>${d ? d.toLocaleDateString('it-IT', { weekday: 'short' }) + ' ' + d.toTimeString().slice(0, 5) : ''}</div>
-        <div><div class="ti">${esc(r.displayTitle || r.file)}</div>
-            <div class="meta">${esc([r.teacher, r.type, r.duration, r.isoDate && new Date(r.isoDate).getFullYear() !== new Date().getFullYear() ? new Date(r.isoDate).getFullYear() : ''].filter(Boolean).join(' · '))}</div>
-            ${r.summary ? `<div class="sum">${esc(r.summary)}</div>` : ''}</div>
-        <div class="st">${recStatus(c, r)}</div></div>`;
+    const p = progress[r.key], tp = tprog[vpath(c, r)];
+    let state = '';
+    if (!r.videoExists) state = p && r.status !== 'error' ? `<span class="pill acc">⬇ ${Math.round(p.percent || 0)}%</span>` : r.status === 'error' ? `<span class="pill err" title="${esc(r.error)}">✗ download</span>` : '<span class="pill">non scaricata</span>';
+    else if (!r.transcript) state = tp === 'queued' ? '<span class="pill">🎙 in coda</span>' : typeof tp === 'number' ? `<span class="pill acc">🎙 ${tp}%</span>` : tp && tp.error ? '<span class="pill err">🎙 errore</span>' : '<span class="pill warn">da trascrivere</span>';
+    const kinds = r.notes.map(f => f.split(' - ').pop().replace(/\.md$/, '')).filter(k => k !== 'sommario');
+    const links = [];
+    if (r.videoExists) links.push('<button class="small primary" data-act="play">▶ Guarda</button>');
+    else links.push('<button class="small" data-act="dl">⬇ Scarica</button>');
+    if (r.transcript) links.push('<button class="small" data-act="text">Trascrizione</button>');
+    else if (r.videoExists && !tp) links.push('<button class="small" data-act="tr">🎙 Trascrivi</button>');
+    for (const k of kinds) links.push(`<button class="small soft" data-act="ai:${esc(k)}">${AI_KIND[k] || esc(k)}</button>`);
+    if (linked) links.push(`<button class="small soft" data-act="notes">✎ ${linked} appunt${linked === 1 ? 'o' : 'i'}</button>`);
+    const sum = r.summary || (r.bullets && r.bullets.length)
+        ? `${r.summary ? `<p class="sum">${esc(r.summary)}</p>` : ''}${r.bullets && r.bullets.length ? `<ul>${r.bullets.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}`
+        : `<p class="sum muted">${r.transcript ? 'Sommario non ancora generato.' : r.videoExists ? 'Il sommario degli argomenti arriverà dopo la trascrizione.' : 'Video non ancora scaricato.'}</p>`;
+    return `<article class="lcard" data-key="${esc(r.key)}">
+        <div class="lc-meta"><span class="lc-n">#${num}</span><span>${d ? esc(d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined })) : '—'}</span>${r.teacher ? `<span>· ${esc(r.teacher)}</span>` : ''}${r.type ? `<span class="tag">${esc(r.type)}</span>` : ''}${r.duration ? `<span>· ${esc(r.duration)}</span>` : ''}<span class="grow"></span>${state}</div>
+        <h3>${esc(r.displayTitle || r.file)}</h3>
+        ${sum}
+        <div class="lc-links">${links.join('')}</div></article>`;
 }
 
 function tabMaterials(c, el) {
@@ -304,6 +327,7 @@ function tabCourseSettings(c, el) {
 
 // ───────── recording page ─────────
 let recData = null;
+const lessonChats = {};                                   // key → [{role, text}] (kept while the app is open)
 function viewRecording(v) {
     const c = course(route.courseId);
     const r = c && c.recordings.find(x => x.key === route.key);
@@ -313,17 +337,19 @@ function viewRecording(v) {
         <div class="crumbs"><a data-go="dash">Dashboard</a> › <a data-go="course">${esc(cname(c))}</a> › ${esc(fmtDate(r.isoDate))}</div>
         <div class="page-head"><div><h1>${esc(r.displayTitle || r.file)}</h1><div class="sub">${[r.isoDate && new Date(r.isoDate).toLocaleString('it-IT', { dateStyle: 'full', timeStyle: 'short' }), r.teacher, r.type, r.duration].filter(Boolean).map(esc).join(' · ')}</div></div></div>
         <div class="rec-layout">
-            <div><div class="player" id="player"><div class="empty">Caricamento…</div></div><div class="info-card" id="r-info"></div></div>
-            <div class="side-panel"><div class="tabs" id="r-tabs">${[['testo', 'Trascrizione'], ['note', 'Note'], ['info', 'Dettagli']].map(([k, l]) => `<button data-s="${k}" class="${(route.side || 'testo') === k ? 'active' : ''}">${l}</button>`).join('')}</div><div class="body" id="r-side"></div></div>
+            <div class="rec-main"><div class="player" id="player"><div class="empty">Caricamento…</div></div><div class="info-card" id="r-info"></div><section class="study" id="r-study"></section></div>
+            <div class="side-panel"><div class="tabs" id="r-tabs">${[['testo', 'Trascrizione'], ['appunti', 'Appunti'], ['info', 'Dettagli']].map(([k, l]) => `<button data-s="${k}" class="${sideTab() === k ? 'active' : ''}">${l}</button>`).join('')}</div><div class="body" id="r-side"></div></div>
         </div></div>`;
     $('[data-go="dash"]', v).onclick = () => go({ name: 'dashboard' });
     $('[data-go="course"]', v).onclick = () => go({ name: 'course', courseId: c.id, tab: route.back || 'lezioni' });
     $$('#r-tabs button', v).forEach(b => b.onclick = () => { route.side = b.dataset.s; $$('#r-tabs button', v).forEach(x => x.classList.toggle('active', x === b)); drawSide(c, r); });
     guard(async () => {
         recData = await api.recording(c.id, r.key);
-        drawPlayer(c, r); drawSide(c, r); drawInfo(c, r);
+        drawPlayer(c, r); drawSide(c, r); drawInfo(c, r); drawStudy(c, r);
+        if (route.study) setTimeout(() => $('#r-study') && $('#r-study').scrollIntoView({ behavior: 'smooth', block: 'start' }), 200);
     });
 }
+const sideTab = () => ({ note: 'appunti' }[route.side] || route.side || 'testo');
 
 function updateRecordingLive() {
     const c = course(route.courseId); const r = c && c.recordings.find(x => x.key === route.key);
@@ -332,7 +358,10 @@ function updateRecordingLive() {
         const sig = d => d.notes.map(n => n.file).join('|') + ':' + !!d.segments + ':' + !!d.text + ':' + !!d.videoUrl;
         const before = sig(recData);
         recData = await api.recording(c.id, r.key);
-        if (sig(recData) !== before) { if (!player && recData.videoUrl) drawPlayer(c, r); if (!aiStream) drawSide(c, r); }
+        if (sig(recData) !== before) {
+            if (!player && recData.videoUrl) drawPlayer(c, r);
+            if (!aiStream) { if (sideTab() === 'testo') drawSide(c, r); drawStudy(c, r); }
+        }
         drawInfo(c, r);
     });
 }
@@ -411,9 +440,23 @@ function highlightSegment(t) {
     }
 }
 
+/** Transcript as clean prose, without timestamps: segments joined into paragraphs at pauses. */
+function plainTranscript() {
+    if (!recData) return '';
+    if (!recData.segments) return (recData.text || '').replace(/^\s*\[?\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\]?\s*(-->\s*\S+\s*)?/gm, '').trim();
+    const paras = []; let cur = '', prevEnd = 0;
+    for (const s of recData.segments) {
+        const t = s.text.trim(); if (!t) continue;
+        if (cur && ((s.start - prevEnd > 2 && /[.?!…]$/.test(cur)) || (cur.length > 900 && /[.?!…]$/.test(cur)))) { paras.push(cur); cur = ''; }
+        cur += (cur ? ' ' : '') + t; prevEnd = s.end;
+    }
+    if (cur) paras.push(cur);
+    return paras.join('\n\n');
+}
+
 function drawSide(c, r) {
     const el = $('#r-side'); if (!el || !recData) return;
-    const side = route.side || 'testo';
+    const side = sideTab();
     if (side === 'testo') {
         if (!recData.segments && !recData.text) {
             const tp = tprog[vpath(c, r)];
@@ -422,7 +465,8 @@ function drawSide(c, r) {
             if ($('#s-tr', el)) $('#s-tr', el).onclick = () => guard(async () => { await api.transcribe(c.id, [r.key]); tprog[vpath(c, r)] = 'queued'; drawSide(c, r); });
             return;
         }
-        el.innerHTML = `<div class="row" style="position:sticky;top:0;background:var(--panel);padding:2px 0 8px;z-index:1"><input id="t-q" placeholder="Cerca nella trascrizione…"><label class="row faint" style="white-space:nowrap"><input type="checkbox" id="r-follow" checked> segui</label></div><div id="t-body"></div>`;
+        el.innerHTML = `<div class="t-bar"><input id="t-q" placeholder="Cerca nella trascrizione…"><button class="small" id="t-copy" title="Copia tutta la trascrizione, senza tempi">⧉ Copia</button></div>
+            <label class="row faint t-follow"><input type="checkbox" id="r-follow" checked> segui il video</label><div id="t-body"></div>`;
         const draw = q => {
             const rx = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi') : null;
             if (recData.segments) {
@@ -432,20 +476,14 @@ function drawSide(c, r) {
         };
         draw('');
         $('#t-q', el).oninput = e => draw(e.target.value.trim());
-    } else if (side === 'note') {
-        const notes = recData.notes;
-        const can = !!(recData.segments || recData.text);
-        el.innerHTML = `<div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:10px">${Object.entries(S.templates).map(([k, l]) => `<button class="small" data-t="${k}" ${can ? '' : 'disabled'}>✨ ${esc(l.split(' (')[0])}</button>`).join('')}</div>
-            ${can ? '' : '<p class="muted">Le note si generano dalla trascrizione.</p>'}
-            <div id="n-stream" class="md hidden" style="white-space:pre-wrap;background:var(--sel);padding:10px;border-radius:8px;margin-bottom:10px"></div>
-            ${notes.map(n => `<details ${notes.length === 1 || n.kind === 'sommario' ? 'open' : ''} style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:600">${esc(n.kind)} <a data-open="${esc(n.file)}" class="faint" style="font-weight:400;float:right">apri ↗</a></summary><div class="md">${md(n.content)}</div></details>`).join('') || (can ? '<p class="muted">Nessuna nota per questa lezione.</p>' : '')}`;
-        $$('[data-t]', el).forEach(b => b.onclick = () => {
-            const st = $('#n-stream', el); st.classList.remove('hidden'); st.textContent = '…'; aiStream = st;
-            $$('[data-t]', el).forEach(x => x.disabled = true);
-            guard(async () => { await api.notes(c.id, r.key, b.dataset.t); aiStream = null; recData = await api.recording(c.id, r.key); drawSide(c, r); drawInfo(c, r); })
-                .finally(() => { aiStream = null; $$('[data-t]', el).forEach(x => x.disabled = false); });
+        $('#t-copy', el).onclick = () => guard(async () => {
+            const txt = plainTranscript();
+            await api.copy(txt);
+            const b = $('#t-copy', el); b.textContent = '✓ Copiata'; setTimeout(() => { if (b.isConnected) b.textContent = '⧉ Copia'; }, 1600);
+            toast(`Trascrizione copiata (${txt.split(/\s+/).length.toLocaleString('it-IT')} parole)`);
         });
-        $$('[data-open]', el).forEach(a => a.onclick = e => { e.preventDefault(); e.stopPropagation(); guard(() => api.open(c.id, 'notes', a.dataset.open)); });
+    } else if (side === 'appunti') {
+        drawLinkedNotes(c, r, el);
     } else {
         el.innerHTML = `<div class="md">
             <p><b>File</b><br><span class="muted">${esc(r.file)}</span></p>
@@ -456,6 +494,187 @@ function drawSide(c, r) {
             ${r.error ? `<p><b>Ultimo errore</b><br><span style="color:var(--err)">${esc(r.error)}</span></p>` : ''}</div>`;
         if ($('[data-tr]', el)) $('[data-tr]', el).onclick = () => guard(() => api.open(c.id, 'transcripts', r.transcript));
     }
+}
+
+// ── user notes linked to this lesson ──
+const lessonLabel = (cid, key) => {
+    const cc = course(cid); const rr = cc && cc.recordings.find(x => x.key === key);
+    if (!rr) return 'lezione rimossa';
+    return `${rr.isoDate ? new Date(rr.isoDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) + ' · ' : ''}${rr.displayTitle || rr.file}`;
+};
+async function drawLinkedNotes(c, r, el) {
+    el.innerHTML = '<div class="empty-state"><span class="spin"></span></div>';
+    const list = await api.notes.forLesson(c.id, r.key);
+    if (sideTab() !== 'appunti' || !el.isConnected) return;
+    el.innerHTML = `<div class="ln-actions"><button class="primary small" id="ln-new">＋ Nuovo appunto</button><button class="small" id="ln-link">🔗 Collega esistente</button></div>
+        ${list.length ? list.map(n => `<div class="ln-item" data-scope="${esc(n.scope || '')}" data-f="${esc(n.file)}" data-k="${n.kind}">
+            <div class="row"><span class="badge-k ${n.kind}">${({ markdown: 'MD', latex: 'TeX', typst: 'Typ' })[n.kind]}</span><b class="grow">${esc(n.file.replace(/\.(md|tex|typ)$/, ''))}</b><button class="icon ghost small" data-unlink title="Scollega da questa lezione">✕</button></div>
+            <div class="faint ln-sub">${n.scope ? esc(cname(course(n.scope) || { name: '' })) : 'Generale'}${n.links.length > 1 ? ` · collegato anche a ${n.links.length - 1} altr${n.links.length === 2 ? 'a lezione' : 'e lezioni'}` : ''}</div></div>`).join('')
+            : `<div class="empty-state small"><p>Nessun appunto collegato a questa lezione.</p><p class="faint">Un appunto può essere collegato a più lezioni: crealo qui o collegalo dall'editor degli appunti (🔗).</p></div>`}`;
+    $('#ln-new', el).onclick = () => guard(async () => {
+        const x = await askNewNote(S.settings.editor.mode || 'markdown');
+        if (!x) return;
+        const f = await api.notes.createLinked(c.id, x.title, x.kind, [{ c: c.id, k: r.key }]);
+        go({ name: 'notes', scope: c.id, file: f, kind: x.kind });
+    });
+    $('#ln-link', el).onclick = () => pickNotesToLink(c, r).then(ok => ok && drawLinkedNotes(c, r, el));
+    $$('.ln-item', el).forEach(it => it.onclick = e => {
+        const scope = it.dataset.scope || null;
+        if (e.target.closest('[data-unlink]')) {
+            e.stopPropagation();
+            return guard(async () => { const cur = await api.notes.links(scope, it.dataset.f); await api.notes.setLinks(scope, it.dataset.f, cur.filter(l => !(l.c === c.id && l.k === r.key))); drawLinkedNotes(c, r, el); });
+        }
+        go({ name: 'notes', scope, file: it.dataset.f, kind: it.dataset.k });
+    });
+}
+async function pickNotesToLink(c, r) {
+    const scopes = [{ id: c.id, name: cname(c) }, { id: null, name: 'Generale' }];
+    const lists = await Promise.all(scopes.map(async s => ({ s, files: await api.notes.list(s.id), links: await Promise.all((await api.notes.list(s.id)).map(f => api.notes.links(s.id, f.file))) })));
+    return new Promise(resolve => {
+        const m = modal(`<h2>Collega appunti a questa lezione</h2><p class="muted" style="margin-top:0">${esc(lessonLabel(c.id, r.key))}</p>
+            <div class="pick-list">${lists.map(({ s, files, links }) => files.length ? `<div class="pick-h">${esc(s.name)}</div>${files.map((f, i) => `<label class="pick"><input type="checkbox" data-scope="${esc(s.id || '')}" data-f="${esc(f.file)}" ${links[i].some(l => l.c === c.id && l.k === r.key) ? 'checked' : ''}><span class="badge-k ${f.kind}">${({ markdown: 'MD', latex: 'TeX', typst: 'Typ' })[f.kind]}</span>${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</label>`).join('')}` : '').join('') || '<p class="muted">Non ci sono ancora appunti.</p>'}</div>
+            <div class="foot"><button class="ghost" id="pk-no">Annulla</button><button class="primary" id="pk-ok">Salva</button></div>`);
+        $('#pk-no', m.el).onclick = () => { m.close(); resolve(false); };
+        $('#pk-ok', m.el).onclick = () => guard(async () => {
+            for (const cb of $$('input[data-f]', m.el)) {
+                const scope = cb.dataset.scope || null;
+                const cur = await api.notes.links(scope, cb.dataset.f);
+                const has = cur.some(l => l.c === c.id && l.k === r.key);
+                if (cb.checked && !has) await api.notes.setLinks(scope, cb.dataset.f, [...cur, { c: c.id, k: r.key }]);
+                if (!cb.checked && has) await api.notes.setLinks(scope, cb.dataset.f, cur.filter(l => !(l.c === c.id && l.k === r.key)));
+            }
+            m.close(); resolve(true);
+        });
+    });
+}
+
+// ── "Studia con l'AI": flashcard, domande d'esame, appunti, spiegazioni, riassunto + domande libere ──
+const STUDY = [
+    ['flashcard', '🃏', 'Flashcard', 'Ripassa con le carte'],
+    ['domande', '❓', 'Domande d\'esame', 'Con traccia di risposta'],
+    ['appunti', '📝', 'Appunti', 'Completi e strutturati'],
+    ['spiegazione', '💡', 'Spiegazioni', 'I concetti difficili'],
+    ['riassunto', '📄', 'Riassunto', 'In una pagina'],
+];
+function parseQA(mdText) {
+    const out = [];
+    for (const b of mdText.split(/^#{2,4}\s*(?:D|Q|Domanda)\s*[:.)]\s*/m).slice(1)) {
+        const [q, ...rest] = b.split(/^\s*(?:\*\*)?(?:R|A|Risposta)\s*[:.)](?:\*\*)?\s*/m);
+        if (q && rest.length) out.push({ q: q.trim(), a: rest.join('').replace(/\n-{3,}\s*$/, '').trim() });
+    }
+    return out;
+}
+function drawStudy(c, r) {
+    const el = $('#r-study'); if (!el || !recData) return;
+    const can = !!(recData.segments || recData.text);
+    const have = Object.fromEntries(recData.notes.map(n => [n.kind, n]));
+    const sel = route.study && (have[route.study] || route.study === 'chat') ? route.study : null;
+    const prov = (S.tools.ai[S.settings.ai.provider] || {}).label || 'AI';
+    el.innerHTML = `<div class="study-head"><h2>✨ Studia con l'AI</h2><span class="faint">${esc(prov)} · a partire dalla trascrizione</span></div>
+        ${can ? '' : '<p class="muted">Gli strumenti AI si attivano quando la lezione è trascritta.</p>'}
+        <div class="study-tools">${STUDY.map(([k, ic, t, d]) => `<button class="stool ${sel === k ? 'on' : ''} ${have[k] ? 'has' : ''}" data-k="${k}" ${can ? '' : 'disabled'}><span class="ic">${ic}</span><b>${t}</b><span class="faint">${have[k] ? '✓ pronto' : d}</span></button>`).join('')}</div>
+        <div id="st-out" class="st-out ${sel && sel !== 'chat' ? '' : 'hidden'}"></div>
+        <div class="st-chat">
+            <div id="st-msgs" class="st-msgs"></div>
+            <div class="st-sugg">${['Spiegami il concetto principale in modo semplice', 'Fammi un esempio pratico', 'Cosa devo sapere per l\'esame?', 'Quali sono le formule chiave?'].map(s => `<button class="small soft" data-sugg="${esc(s)}" ${can ? '' : 'disabled'}>${esc(s)}</button>`).join('')}</div>
+            <div class="st-ask"><textarea id="st-q" rows="1" placeholder="Chiedi qualcosa su questa lezione… (↵ invia, ⇧↵ a capo)" ${can ? '' : 'disabled'}></textarea><button class="primary" id="st-send" ${can ? '' : 'disabled'}>↑</button></div>
+        </div>`;
+    const show = k => {
+        route.study = k;
+        $$('.stool', el).forEach(b => b.classList.toggle('on', b.dataset.k === k));
+        const out = $('#st-out', el); out.classList.remove('hidden');
+        const n = recData.notes.find(x => x.kind === k);
+        if (!n) return generate(k);
+        const qa = (k === 'flashcard' || k === 'domande') ? parseQA(n.content) : [];
+        out.innerHTML = `<div class="st-out-head"><b>${STUDY.find(s => s[0] === k)[1]} ${STUDY.find(s => s[0] === k)[2]}</b><span class="grow"></span>
+            <button class="small ghost" data-a="copy">⧉ Copia</button><button class="small ghost" data-a="save" title="Crea un appunto modificabile collegato a questa lezione">✎ Negli appunti</button><button class="small ghost" data-a="regen">↻ Rigenera</button><button class="small ghost" data-a="file">↗</button><button class="small ghost icon" data-a="close">✕</button></div>
+            <div class="st-body" id="st-body"></div>`;
+        const body = $('#st-body', out);
+        if (k === 'flashcard' && qa.length) flashDeck(body, qa);
+        else if (k === 'domande' && qa.length) body.innerHTML = `<div class="qa-list">${qa.map((x, i) => `<details class="qa"><summary><span class="qa-n">${i + 1}</span><span class="md">${md(x.q)}</span></summary><div class="md">${md(x.a)}</div></details>`).join('')}</div>`;
+        else body.innerHTML = `<div class="md">${md(n.content)}</div>`;
+        $$('[data-a]', out).forEach(b => b.onclick = () => guard(async () => {
+            const a = b.dataset.a;
+            if (a === 'copy') { await api.copy(n.content); toast('Copiato'); }
+            else if (a === 'file') api.open(c.id, 'notes', n.file);
+            else if (a === 'close') { route.study = null; out.classList.add('hidden'); $$('.stool', el).forEach(x => x.classList.remove('on')); }
+            else if (a === 'regen') generate(k);
+            else if (a === 'save') {
+                const f = await api.notes.createLinked(c.id, `${r.displayTitle || 'Lezione'} — ${STUDY.find(s => s[0] === k)[2]}`, 'markdown', [{ c: c.id, k: r.key }], n.content);
+                toast('Appunto creato e collegato alla lezione'); go({ name: 'notes', scope: c.id, file: f, kind: 'markdown' });
+            }
+        }));
+    };
+    const generate = k => {
+        const out = $('#st-out', el); out.classList.remove('hidden');
+        out.innerHTML = `<div class="st-out-head"><span class="spin"></span><b>Genero ${STUDY.find(s => s[0] === k)[2].toLowerCase()}…</b><span class="faint">può richiedere un minuto</span></div><pre class="st-stream" id="st-stream"></pre>`;
+        aiStream = $('#st-stream', out); window.aiWant = { key: r.key, template: k };
+        $$('.stool', el).forEach(b => b.disabled = true);
+        guard(async () => { await api.genNote(c.id, r.key, k); recData = await api.recording(c.id, r.key); })
+            .finally(() => { aiStream = null; window.aiWant = null; drawStudy(c, r); drawInfo(c, r); if (recData.notes.some(n => n.kind === k)) { route.study = k; drawStudy(c, r); } });
+    };
+    $$('.stool', el).forEach(b => b.onclick = () => show(b.dataset.k));
+    if (sel && sel !== 'chat') show(sel);
+    // chat
+    const msgs = lessonChats[r.key] = lessonChats[r.key] || [];
+    const drawMsgs = () => {
+        const box = $('#st-msgs', el);
+        box.innerHTML = msgs.map((m, i) => `<div class="msg ${m.role}">${m.role === 'user' ? esc(m.text) : `<div class="md">${md(m.text)}</div><div class="msg-act"><button class="small ghost" data-copy="${i}">⧉ Copia</button><button class="small ghost" data-save="${i}">✎ Salva negli appunti</button></div>`}</div>`).join('');
+        $$('[data-copy]', box).forEach(b => b.onclick = () => guard(async () => { await api.copy(msgs[+b.dataset.copy].text); toast('Copiato'); }));
+        $$('[data-save]', box).forEach(b => b.onclick = () => guard(async () => {
+            const i = +b.dataset.save; const q = (msgs[i - 1] || {}).text || 'Domanda';
+            const f = await api.notes.createLinked(c.id, `${q.slice(0, 50)}`, 'markdown', [{ c: c.id, k: r.key }], `# ${q}\n\n${msgs[i].text}`);
+            toast('Salvato negli appunti, collegato alla lezione'); go({ name: 'notes', scope: c.id, file: f, kind: 'markdown' });
+        }));
+    };
+    drawMsgs();
+    const ask = q => {
+        q = (q || '').trim(); if (!q || aiStream) return;
+        const history = msgs.slice();
+        msgs.push({ role: 'user', text: q });
+        drawMsgs();
+        const box = $('#st-msgs', el);
+        const bubble = document.createElement('div'); bubble.className = 'msg assistant'; bubble.innerHTML = '<pre class="st-stream"><span class="spin"></span></pre>'; box.appendChild(bubble);
+        bubble.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        aiStream = $('pre', bubble); window.aiWant = { key: r.key, template: 'domanda' };
+        $('#st-q', el).value = '';
+        api.askLesson(c.id, r.key, q, history).then(a => msgs.push({ role: 'assistant', text: a.trim() }))
+            .catch(e => msgs.push({ role: 'assistant', text: '✗ ' + e.message }))
+            .finally(() => { aiStream = null; window.aiWant = null; drawMsgs(); const last = $('#st-msgs', el).lastElementChild; if (last) last.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); });
+    };
+    const ta = $('#st-q', el);
+    ta.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(ta.value); } };
+    ta.oninput = () => { ta.style.height = 'auto'; ta.style.height = Math.min(160, ta.scrollHeight) + 'px'; };
+    $('#st-send', el).onclick = () => ask(ta.value);
+    $$('[data-sugg]', el).forEach(b => b.onclick = () => ask(b.dataset.sugg));
+}
+
+function flashDeck(el, cards) {
+    let i = 0, flipped = false;
+    const known = new Set();
+    const draw = () => {
+        const x = cards[i];
+        el.innerHTML = `<div class="deck">
+            <div class="fcard ${flipped ? 'flip' : ''}" id="fc"><div class="fside front"><span class="faint">Domanda ${i + 1} di ${cards.length}</span><div class="md">${md(x.q)}</div><span class="faint fc-hint">clic o spazio per girare</span></div>
+                <div class="fside back"><span class="faint">Risposta</span><div class="md">${md(x.a)}</div></div></div>
+            <div class="deck-bar"><button id="fc-prev">←</button><span class="faint">${known.size} sapute · ${cards.length - known.size} da ripassare</span><span class="grow"></span>
+                <button id="fc-no" class="small">✗ Da ripassare</button><button id="fc-yes" class="small primary">✓ La so</button><button id="fc-next">→</button></div>
+            <div class="deck-prog"><i style="width:${(i + 1) / cards.length * 100}%"></i></div></div>`;
+        $('#fc', el).onclick = () => { flipped = !flipped; $('#fc', el).classList.toggle('flip', flipped); };
+        const move = d => { i = (i + d + cards.length) % cards.length; flipped = false; draw(); };
+        $('#fc-prev', el).onclick = () => move(-1);
+        $('#fc-next', el).onclick = () => move(1);
+        $('#fc-yes', el).onclick = () => { known.add(i); move(1); };
+        $('#fc-no', el).onclick = () => { known.delete(i); move(1); };
+    };
+    draw();
+    el.tabIndex = 0;
+    el.onkeydown = e => {
+        if (/input|textarea/i.test(document.activeElement.tagName) && document.activeElement !== el) return;
+        if (e.code === 'Space') { e.preventDefault(); e.stopPropagation(); $('#fc', el) && $('#fc', el).click(); }
+        else if (e.key === 'ArrowRight') { e.stopPropagation(); $('#fc-next', el).click(); }
+        else if (e.key === 'ArrowLeft') { e.stopPropagation(); $('#fc-prev', el).click(); }
+    };
 }
 
 function drawInfo(c, r) {
@@ -473,7 +692,7 @@ function drawInfo(c, r) {
     on('i-ext', () => { if (player) player.pause(); return api.openPath(recData.videoPath); });
     on('i-finder', () => api.reveal(recData.videoPath));
     on('i-webex', () => api.openExternal(r.webexUrl));
-    on('i-sum', async () => { toast('Genero il sommario…'); await api.notes(c.id, r.key, 'sommario'); });
+    on('i-sum', async () => { toast('Genero il sommario…'); await api.genNote(c.id, r.key, 'sommario'); });
     on('i-tr', async () => { await api.transcribe(c.id, [r.key]); tprog[vpath(c, r)] = 'queued'; toast('In coda per la trascrizione'); });
 }
 
@@ -690,6 +909,15 @@ const soft = () => { if (rafPending) return; rafPending = true; requestAnimation
 let refreshT = null;
 const softRefresh = () => { clearTimeout(refreshT); refreshT = setTimeout(async () => { if (!isSticky()) $('#view').dataset.view = ''; await refresh(); }, 400); };
 
+// links inside rendered Markdown open in the system browser, never inside the app window
+document.addEventListener('click', e => {
+    const a = e.target.closest('.md a[href], .lcard a[href]');
+    if (!a) return;
+    const h = a.getAttribute('href') || '';
+    if (/^https?:|^mailto:/i.test(h)) { e.preventDefault(); api.openExternal(h); }
+    else if (!h.startsWith('#')) e.preventDefault();
+}, true);
+
 api.on(e => {
     switch (e.type) {
         case 'log': log(e.msg); break;
@@ -705,8 +933,11 @@ api.on(e => {
         case 'transcribe-progress': tprog[e.video] = e.percent; soft(); break;
         case 'transcribe-done': delete tprog[e.video]; log('✓ Trascritto ' + e.video.split(/[\\/]/).pop(), false); softRefresh(); break;
         case 'transcribe-error': tprog[e.video] = { error: e.error }; log('✗ ' + e.error); soft(); break;
-        case 'ai-start': log(`✨ ${(S && S.tools.ai[e.provider] || {}).label || 'AI'} al lavoro…`); if (aiStream) aiStream.textContent = ''; break;
-        case 'ai-chunk': if (window.aiStreamTarget) { window.aiStreamTarget.textContent += e.chunk; } else if (aiStream) { aiStream.textContent += e.chunk; aiStream.scrollTop = 1e9; } break;
+        case 'ai-start': log(`✨ ${(S && S.tools.ai[e.provider] || {}).label || 'AI'} al lavoro…`);
+            // streams go only to the view that asked for them (background AI jobs must not write into it)
+            if (aiStream && (!window.aiWant || (e.key === window.aiWant.key && e.template === window.aiWant.template))) { aiJob = e.jobId; aiStream.textContent = ''; }
+            break;
+        case 'ai-chunk': if (window.aiStreamTarget) { window.aiStreamTarget.textContent += e.chunk; } else if (aiStream && (!aiJob || e.jobId === aiJob)) { aiStream.textContent += e.chunk; aiStream.scrollTop = 1e9; const sc = aiStream.closest('.st-msgs'); if (sc) sc.scrollTop = 1e9; } break;
         case 'ai-done': log('✓ AI completato' + (e.file ? ': ' + e.file : ''), false); softRefresh(); break;
         case 'ai-error': log('✗ AI: ' + e.error); if (aiStream) aiStream.textContent += '\n\n✗ ' + e.error; break;
         case 'setup-step': { const st = $('#st-' + e.step); if (st) { $('.s', st).innerHTML = e.status === 'done' ? '<span style="color:var(--ok)">✓</span>' : '<span class="spin"></span>'; $('.d', st).textContent = e.detail; } break; }

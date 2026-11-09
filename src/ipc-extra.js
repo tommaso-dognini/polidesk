@@ -120,6 +120,55 @@ function register({ handle, send, cfg, findCourse, getSession, closeSession, isS
     handle('notes:remove', async ({ scope, file }) => notes.remove(notesDir(scope), file));
     handle('notes:asset', async ({ scope, file, name, data }) => notes.saveAsset(notesDir(scope), file, name, data));
     handle('notes:dir', async scope => notesDir(scope));
+    // ── note ↔ lesson links ──
+    const allScopes = () => [null].concat(cfg().courses.map(c => c.id));
+    handle('notes:links', async ({ scope, file }) => notes.getLinks(notesDir(scope), file));
+    handle('notes:setLinks', async ({ scope, file, links }) => notes.setLinks(notesDir(scope), file, links));
+    handle('notes:forLesson', async ({ courseId, key }) => {
+        const out = [];
+        for (const sc of allScopes()) {
+            const dir = notesDir(sc); const all = notes.getAllLinks(dir);
+            const files = Object.entries(all).filter(([, ls]) => ls.some(l => l.c === courseId && l.k === key)).map(([f]) => f);
+            if (!files.length) continue;
+            const meta = notes.list(dir);
+            for (const f of files) { const m = meta.find(x => x.file === f); if (m) out.push({ scope: sc, ...m, links: all[f] }); }
+        }
+        return out;
+    });
+    handle('notes:linkCounts', async courseId => {
+        const counts = {};
+        for (const sc of allScopes()) for (const ls of Object.values(notes.getAllLinks(notesDir(sc)))) for (const l of ls) if (l.c === courseId) counts[l.k] = (counts[l.k] || 0) + 1;
+        return counts;
+    });
+    handle('notes:createLinked', async ({ scope, title, kind, links, content }) => {
+        const dir = notesDir(scope);
+        const f = notes.create(dir, title, kind);
+        if (content) notes.write(dir, f, content);
+        notes.setLinks(dir, f, links);
+        onNotesChanged(scope);
+        return f;
+    });
+    handle('clipboard:write', async text => { require('electron').clipboard.writeText(String(text || '')); return true; });
+    // ── ask a question about ONE lesson (transcript as context), streamed ──
+    handle('lesson:ask', async ({ courseId, key, question, history }) => {
+        const c = findCourse(courseId);
+        const d = lib.courseDirs(c.dir);
+        const rec = lib.withFileStatus(c.dir, lib.loadManifest(c.dir)).find(r => r.key === key);
+        if (!rec || !rec.transcript) throw new Error('Serve la trascrizione della lezione');
+        const text = fs.readFileSync(path.join(d.transcripts, rec.transcript), 'utf8');
+        const prov = pickProvider(cfg().settings);
+        const jobId = crypto.randomUUID();
+        const prev = (history || []).slice(-6).map(h => `${h.role === 'user' ? 'Studente' : 'Tutor'}: ${h.text}`).join('\n');
+        const prompt = `Sei un tutor universitario. Rispondi alla domanda dello studente sulla lezione "${rec.displayTitle || rec.topic || ''}" usando la trascrizione (automatica, può contenere errori di riconoscimento). ` +
+            `Rispondi in Markdown, nella lingua della domanda, in modo chiaro e conciso; formule in LaTeX ($...$). Se la lezione non tratta l'argomento dillo, poi rispondi comunque brevemente con le tue conoscenze indicandolo. ` +
+            `Quando utile cita il punto della lezione.\n\n${prev ? 'Conversazione precedente:\n' + prev + '\n\n' : ''}Domanda: ${question}`;
+        send({ type: 'ai-start', jobId, course: c.id, key, template: 'domanda', provider: prov });
+        try {
+            const out = await ai.runPrompt(prov, prompt, text, { model: cfg().settings.ai.model, cwd: os.tmpdir(), onChunk: ch => send({ type: 'ai-chunk', jobId, chunk: ch }) });
+            send({ type: 'ai-done', jobId, course: c.id, key });
+            return out;
+        } catch (e) { send({ type: 'ai-error', jobId, error: e.message }); throw e; }
+    });
     handle('notes:engines', async () => notes.engineStatus());
     handle('notes:installEngine', async name => notes.installEngine(name, line => send({ type: 'log', msg: `🧰 ${line}` })));
     handle('notes:compile', async ({ scope, file }) => {

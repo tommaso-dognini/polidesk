@@ -153,10 +153,16 @@ function withFileStatus(courseDir, manifest) {
     const d = courseDirs(courseDir);
     const recs = Object.values(manifest.recordings || {}).map(r => {
         const st = fileStatus(courseDir, r);
-        let summary = null;
+        let summary = null, bullets = [];
         const sf = st.notes.find(n => / - sommario\.md$/.test(n));
-        if (sf) { try { summary = fs.readFileSync(path.join(d.notes, sf), 'utf8').split('\n').map(l => l.trim()).find(l => l && !/^[#\-*•]/.test(l)) || null; } catch (e) { } }
-        return { ...r, ...st, displayTitle: prettyTopic(r), summary };
+        if (sf) {
+            try {
+                const lines = fs.readFileSync(path.join(d.notes, sf), 'utf8').split('\n').map(l => l.trim()).filter(l => l && !/^#/.test(l));
+                summary = (lines.find(l => !/^[-*•]/.test(l)) || '').replace(/\*\*/g, '') || null;
+                bullets = lines.filter(l => /^[-*•]\s+/.test(l)).map(l => l.replace(/^[-*•]\s+/, '').replace(/\*\*/g, '')).slice(0, 8);
+            } catch (e) { }
+        }
+        return { ...r, ...st, displayTitle: prettyTopic(r), summary, bullets };
     });
     return recs.sort((a, b) => (a.isoDate || '').localeCompare(b.isoDate || ''));
 }

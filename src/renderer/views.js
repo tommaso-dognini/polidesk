@@ -164,6 +164,46 @@ window.extraViews.notes = async v => {
     else welcome();
 };
 
+// ── links note ↔ lessons (one note can cover several lessons, also of different courses) ──
+async function drawNoteLinks(scope, file) {
+    const box = $('#ed-links'); if (!box) return;
+    const links = await api.notes.links(scope, file);
+    if (Notes.file !== file || !box.isConnected) return;
+    const label = l => { const cc = course(l.c); const rr = cc && cc.recordings.find(x => x.key === l.k); return rr ? `${rr.isoDate ? new Date(rr.isoDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : ''} ${rr.displayTitle || ''}`.trim() : null; };
+    const valid = links.filter(l => label(l));
+    box.innerHTML = valid.map(l => `<a class="lchip" data-c="${esc(l.c)}" data-k="${esc(l.k)}" title="${esc((course(l.c) ? cname(course(l.c)) + ' · ' : '') + label(l))}">▶ ${esc(label(l).slice(0, 34))}</a>`).join('') +
+        `<button class="lchip add" id="ed-link-add" title="Collega a una o più lezioni">🔗 ${valid.length ? 'Modifica' : 'Collega a lezioni'}</button>`;
+    $$('.lchip[data-k]', box).forEach(a => a.onclick = () => go({ name: 'recording', courseId: a.dataset.c, key: a.dataset.k, side: 'appunti' }));
+    $('#ed-link-add', box).onclick = () => pickLessons(scope, file, links).then(ok => ok && drawNoteLinks(scope, file));
+}
+function pickLessons(scope, file, current) {
+    const has = (c, k) => current.some(l => l.c === c && l.k === k);
+    const courses = S.courses.slice().sort((a, b) => (a.id === scope ? -1 : b.id === scope ? 1 : 0));
+    return new Promise(resolve => {
+        const root = $('#modal-root');
+        root.innerHTML = `<div class="modal-bg"><div class="modal wide"><h2>Collega a lezioni</h2>
+            <p class="muted" style="margin-top:0">L'appunto comparirà nella pagina di ogni lezione selezionata (scheda «Appunti»).</p>
+            <input id="pl-q" placeholder="Filtra per titolo o data…">
+            <div class="pick-list" id="pl-list">${courses.map(cc => `<details ${cc.id === scope || cc.recordings.some(r => has(cc.id, r.key)) ? 'open' : ''}><summary class="pick-h">${esc(cname(cc))} <span class="faint">${cc.recordings.length}</span></summary>
+                ${cc.recordings.slice().sort((a, b) => (b.isoDate || '').localeCompare(a.isoDate || '')).map(r => `<label class="pick" data-t="${esc(((r.displayTitle || '') + ' ' + (r.isoDate || '')).toLowerCase())}"><input type="checkbox" data-c="${esc(cc.id)}" data-k="${esc(r.key)}" ${has(cc.id, r.key) ? 'checked' : ''}><span class="faint pick-d">${r.isoDate ? new Date(r.isoDate).toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }) : '—'}</span>${esc(r.displayTitle || r.file)}</label>`).join('')}</details>`).join('')}</div>
+            <div class="foot"><span class="faint" id="pl-n"></span><span class="grow"></span><button class="ghost" id="pl-no">Annulla</button><button class="primary" id="pl-ok">Salva</button></div></div></div>`;
+        const done = v => { root.innerHTML = ''; document.removeEventListener('keydown', key); resolve(v); };
+        const key = e => { if (e.key === 'Escape') done(false); };
+        document.addEventListener('keydown', key);
+        const count = () => { $('#pl-n').textContent = `${$$('#pl-list input:checked').length} lezioni selezionate`; };
+        count(); $$('#pl-list input').forEach(i => i.onchange = count);
+        $('#pl-q').oninput = e => { const q = e.target.value.toLowerCase(); $$('#pl-list .pick').forEach(l => l.style.display = !q || l.dataset.t.includes(q) ? '' : 'none'); if (q) $$('#pl-list details').forEach(d => d.open = true); };
+        $('#pl-no').onclick = () => done(false);
+        $('.modal-bg', root).onclick = e => { if (e.target.classList.contains('modal-bg')) done(false); };
+        $('#pl-ok').onclick = () => guard(async () => {
+            const keep = current.filter(l => !course(l.c));       // links to courses no longer in the app are preserved
+            const sel = $$('#pl-list input:checked').map(i => ({ c: i.dataset.c, k: i.dataset.k }));
+            await api.notes.setLinks(scope, file, keep.concat(sel)); done(true);
+        });
+        $('#pl-q').focus();
+    });
+}
+
 function welcome() {
     const m = $('#n-main'); if (!m) return;
     const scopeName = Notes.scope && course(Notes.scope) ? cname(course(Notes.scope)) : 'Generale';
@@ -203,7 +243,7 @@ async function openNote(file, kind, scope = Notes.scope) {
     m.innerHTML = `<header class="ed-head">
             <button class="ghost icon ed-files" id="ed-files" title="Mostra/nascondi elenco appunti (⌘⇧E)">☰</button>
             <div class="ed-titlebox"><input class="ed-title" id="ed-title" value="${esc(file.replace(/\.(md|tex|typ)$/, '').split('/').pop())}" spellcheck="false">
-                <div class="ed-meta"><span class="badge-k ${kind}">${KIND_LABEL[kind]}</span><span>${esc(scopeName)}</span><span id="ed-saved">Salvato</span></div></div>
+                <div class="ed-meta"><span class="badge-k ${kind}">${KIND_LABEL[kind]}</span><span>${esc(scopeName)}</span><span id="ed-saved">Salvato</span><span class="ed-links" id="ed-links"></span></div></div>
             <div class="ed-actions">
                 <div class="seg" id="ed-mode">${[['write', 'Scrivi'], ['split', 'Dividi'], ['read', compiled ? 'PDF' : 'Leggi']].map(([k, l]) => `<button data-m="${k}" class="${mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>
                 ${compiled ? '<button class="primary" id="ed-compile" title="⌘↵">▶ Compila</button>' : ''}
@@ -256,6 +296,7 @@ async function openNote(file, kind, scope = Notes.scope) {
     $('#ed-ai').onclick = () => { Notes.aiOpen = !Notes.aiOpen; $('.ed-body').classList.toggle('with-ai', Notes.aiOpen); $('#ed-ai').classList.toggle('on', Notes.aiOpen); if (Notes.aiOpen) $('#ai-q') && $('#ai-q').focus(); };
     $('#ed-export').onclick = e => exportMenu(e);
     $('#ed-files').onclick = () => Notes.toggleFiles && Notes.toggleFiles();
+    drawNoteLinks(scope, file);
     $('#ed-more').onclick = e => showMenu(e.clientX - 200, e.clientY + 10, [
         ['📁 Mostra nella cartella', () => api.reveal(Notes.dir + '/' + file)],
         ['↗ Apri con app di sistema', () => api.openPath(Notes.dir + '/' + file)],

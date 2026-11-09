@@ -42,6 +42,14 @@ Rispondi SOLO con il Markdown degli appunti.`,
         suffix: 'spiegazione',
         prompt: `Riceverai la trascrizione automatica di una lezione universitaria. Individua i 3-6 concetti più difficili e spiegali in modo chiaro e intuitivo in Markdown, nella lingua della lezione: intuizione, formalizzazione (LaTeX), esempio numerico o pratico, errori comuni. Rispondi SOLO con il Markdown.`,
     },
+    domande: {
+        label: 'Domande d\'esame',
+        suffix: 'domande',
+        prompt: `Riceverai la trascrizione automatica di una lezione universitaria. Scrivi 8-12 possibili DOMANDE D'ESAME sugli argomenti della lezione, nella lingua della lezione, dalle più semplici alle più impegnative (teoria, dimostrazioni/derivazioni, esercizi). Per ognuna una traccia di risposta. Formato Markdown esatto:
+### D: domanda
+R: traccia di risposta (punti chiave, formule in LaTeX)
+Rispondi SOLO con il Markdown.`,
+    },
     flashcard: {
         label: 'Flashcard / domande',
         suffix: 'flashcard',
