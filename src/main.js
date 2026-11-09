@@ -350,6 +350,7 @@ function createWindow() {
     });
     // POLIREC_SMOKE=out.png [POLIREC_SMOKE_JS=code]: render, screenshot, quit (automated UI checks)
     if (process.env.POLIREC_SMOKE) {
+        win.webContents.setBackgroundThrottling(false);   // keep painting even when not focused (fresh captures)
         win.webContents.once('did-finish-load', () => setTimeout(async () => {
             if (process.env.POLIREC_SMOKE_JS) { await win.webContents.executeJavaScript(process.env.POLIREC_SMOKE_JS).catch(e => console.error(e)); await new Promise(r => setTimeout(r, 1500)); }
             fs.writeFileSync(process.env.POLIREC_SMOKE, (await win.webContents.capturePage()).toPNG());

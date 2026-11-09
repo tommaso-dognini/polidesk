@@ -11,7 +11,7 @@
     <div id="app">
         <aside id="sidebar">
             <div class="drag"></div>
-            <div class="brand"><span class="logo">●</span><span>PoliRec</span></div>
+            <div class="brand"><span class="logo">●</span><span>PoliRec</span><span class="grow"></span><button class="icon ghost small sb-btn" id="sb-hide" title="Nascondi barra laterale (⌘\)">⇤</button></div>
             <nav class="nav">
                 <a data-route="dashboard" class="nav-item"><span class="ico">⌂</span>Dashboard</a>
                 <a data-route="notes" class="nav-item"><span class="ico">✎</span>Appunti</a>
@@ -28,7 +28,9 @@
             </nav>
             <div id="side-status" class="side-status"></div>
         </aside>
+        <div id="sb-hot" title=""></div>
         <main id="main">
+            <button class="icon ghost small sb-btn" id="sb-show" title="Mostra barra laterale (⌘\)">☰</button>
             <div class="drag top"></div>
             <div id="banner" class="banner hidden"></div>
             <div id="view"></div>

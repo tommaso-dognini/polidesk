@@ -533,3 +533,37 @@ setTimeout(async () => {
         if (u) { const b = $('#banner'); b.innerHTML = `Nuova versione ${esc(u.version)} disponibile · <a id="upd-l">Scarica</a>`; b.classList.remove('hidden'); $('#upd-l').onclick = () => api.openExternal(u.url); }
     } catch (e) { }
 }, 3000);
+
+
+// ═════════════ collapsible sidebar ═════════════
+(() => {
+    const app = $('#app');
+    if (navigator.platform.toLowerCase().includes('mac')) document.documentElement.classList.add('mac');
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('sbCollapsed') === '1'; } catch (e) { }
+    let hideT = null;
+    const set = c => {
+        collapsed = c;
+        app.classList.toggle('sb-collapsed', c);
+        app.classList.remove('sb-peek');
+        try { localStorage.setItem('sbCollapsed', c ? '1' : '0'); } catch (e) { }
+    };
+    const peek = on => {
+        if (!collapsed) return;
+        clearTimeout(hideT);
+        if (on) app.classList.add('sb-peek');
+        else hideT = setTimeout(() => app.classList.remove('sb-peek'), 250);   // small grace period
+    };
+    set(collapsed);
+    $('#sb-hide').onclick = () => set(!collapsed);
+    $('#sb-show').onclick = () => set(false);
+    $('#sb-hot').addEventListener('mouseenter', () => peek(true));
+    $('#sidebar').addEventListener('mouseenter', () => peek(true));
+    $('#sidebar').addEventListener('mouseleave', () => peek(false));
+    // clicking a link in the peeking sidebar closes it
+    $('#sidebar').addEventListener('click', e => { if (collapsed && e.target.closest('.nav-item')) app.classList.remove('sb-peek'); });
+    document.addEventListener('keydown', e => {
+        if ((e.metaKey || e.ctrlKey) && e.key === '\\') { e.preventDefault(); set(!collapsed); }
+    });
+    window.toggleSidebar = set;
+})();

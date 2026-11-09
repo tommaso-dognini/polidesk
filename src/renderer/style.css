@@ -381,3 +381,26 @@ html[data-theme="developer"] .block { border: 1px solid var(--line); }
 .stats2 b { display: block; font-size: 1.05em; } .stats2 span { color: var(--muted); font-size: .82em; }
 .pill.rec { margin-left: 6px; }
 @media (max-width: 1100px) { .ov { grid-template-columns: 1fr; } }
+
+/* ───────── collapsible sidebar (hidden → peeks on hover at the left edge) ───────── */
+#app { transition: grid-template-columns .2s ease; }
+.brand .sb-btn { -webkit-app-region: no-drag; opacity: .55; }
+.brand .sb-btn:hover { opacity: 1; }
+#sb-show { display: none; position: absolute; top: 12px; left: 86px; z-index: 6; -webkit-app-region: no-drag; }
+html:not(.mac) #sb-show { left: 12px; }
+#sb-hot { display: none; }
+#app.sb-collapsed { grid-template-columns: 0 1fr; }
+#app.sb-collapsed #sb-show { display: inline-flex; }
+#app.sb-collapsed #sb-hot { display: block; position: fixed; left: 0; top: 0; bottom: 0; width: 10px; z-index: 30; }
+#app.sb-collapsed #sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 250px; z-index: 31;
+    transform: translateX(-102%); transition: transform .18s ease, box-shadow .18s ease;
+    border-right: 1px solid var(--line); background: var(--side); backdrop-filter: blur(24px);
+}
+#app.sb-collapsed.sb-peek #sidebar { transform: none; box-shadow: var(--shadow-lg); }
+#app.sb-collapsed .brand .sb-btn { transform: scaleX(-1); }
+#app.sb-collapsed .page { padding-top: 46px; }
+#app.sb-collapsed .notes-side { padding-top: 46px; }
+/* keep grid placement explicit: when the sidebar becomes position:fixed it leaves the grid */
+#sidebar { grid-column: 1; grid-row: 1; }
+#main { grid-column: 2; grid-row: 1; }
