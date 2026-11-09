@@ -59,7 +59,7 @@ Attiva **Impostazioni → Assistenti AI e automazioni → Assistenti AI (MCP)**,
 
 ```bash
 # Claude Code: un clic su «Aggiungi a Claude Code», oppure
-claude mcp add polirec --scope user -e ELECTRON_RUN_AS_NODE=1 -- <eseguibile dell'app> <cartella dell'app>/src/mcp.js
+claude mcp add polirec --scope user -- <cartella dell'app>/bin/polirec mcp
 
 # riga di comando (l'alias esatto si copia dalle Impostazioni)
 polirec lessons ANN                         # lezioni del corso con sommario
@@ -88,12 +88,12 @@ polirec rooms --from 14:00 --hours 2        # aule libere
 ```bash
 git clone <questa-repo> polirec && cd polirec
 npm install
-npm start               # avvia l'app (compila prima l'editor)
+npm start               # avvia l'app (compila editor e backend Rust)
 npm run cli -- help     # riga di comando
 npm run dist:mac        # installer (anche dist:win, dist:linux)
 ```
 
-Requisiti: Node.js 22+, Google Chrome. Struttura del codice, test con dati isolati (`POLIREC_HOME`) e rilascio:
+Requisiti: Node.js 22+, Rust (stable, via [rustup](https://rustup.rs)), Google Chrome. Struttura del codice, test con dati isolati (`POLIREC_HOME`) e rilascio:
 **[Sviluppo](docs/wiki/Sviluppo.md)**.
 
 ## Privacy

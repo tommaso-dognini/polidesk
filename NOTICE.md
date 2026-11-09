@@ -18,7 +18,7 @@ nota di copyright, riportate qui sotto. Le licenze MIT, BSD, ISC e Apache-2.0 so
 | Progetto | Autore | Licenza | Uso in PoliRec |
 |---|---|---|---|
 | [PoliWebex](https://github.com/sup3rgiu/PoliWebex) | sup3rgiu | MIT | Base del motore di download WebEx. Il codice originale modificato è in `legacy/`, con la sua licenza (`legacy/LICENSE`, Copyright (c) 2020 SUPERGIU). |
-| [polimi-schedule-js](https://github.com/bebora/polimi-schedule-js) | bebora | MIT | **Incluso** in `src/vendor/polimi-schedule-js/` (non modificato): conversione dell'orario dei Servizi Online in eventi/iCalendar. |
+| [polimi-schedule-js](https://github.com/bebora/polimi-schedule-js) | bebora | MIT | **Portato in Rust** in `crates/polirec-core/src/schedule.rs` (stessa logica, risultati identici sui test originali): conversione dell'orario dei Servizi Online in eventi/iCalendar. Licenza originale in `crates/polirec-core/licenses/polimi-schedule-js.LICENSE`. |
 | [PoliDown](https://github.com/sup3rgiu/PoliDown) | sup3rgiu | MIT | Riferimento per il supporto futuro ai video Microsoft Stream/SharePoint. |
 | [WebXDownloader](https://github.com/jacopo-j/WebXDownloader) | jacopo-j | MIT | Riferimento per le API di download WebEx. |
 
@@ -41,18 +41,28 @@ linkati nella pagina *Community*: senza licenza il loro codice non può essere r
 | Componente | Licenza |
 |---|---|
 | [Electron](https://www.electronjs.org/) | MIT |
-| [puppeteer-core](https://pptr.dev/) | Apache-2.0 |
 | [CodeMirror 6](https://codemirror.net/) | MIT |
 | [@codemirror/merge](https://github.com/codemirror/merge) | MIT (revisione inline delle modifiche proposte dall'AI) |
 | [markdown-it](https://github.com/markdown-it/markdown-it) | MIT |
-| [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | MIT (server MCP per gli assistenti AI) |
-| [zod](https://zod.dev) | MIT |
 | [Leaflet](https://leafletjs.com/) | BSD-2-Clause (`src/renderer/vendor/leaflet/LICENSE`) — mappa delle aule; forme degli edifici e foto delle aule dalle API pubbliche del Politecnico, nessuna tile di terze parti |
 | [KaTeX](https://katex.org/) (codice e font) | MIT |
-| [luxon](https://moment.github.io/luxon/), [uuid](https://github.com/uuidjs/uuid) | MIT |
-| [immutable-ics](https://github.com/angeloashmore/immutable-ics) | ISC |
 | [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | SIL Open Font License 1.1 (`src/renderer/fonts/`) |
 | [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) | GPL-3.0. È il binario FFmpeg, distribuito come programma separato e invocato come processo esterno. Licenza e note di build in `ffmpeg.LICENSE` / `ffmpeg.README` dentro `app.asar.unpacked/node_modules/ffmpeg-static/`. Sorgenti: https://ffmpeg.org/download.html |
+
+## Backend in Rust (polirecd, polirec)
+
+Crate incluse nei binari, tutte con licenze compatibili con la GPL-3.0 (elenco completo con `cargo tree`):
+
+| Crate | Licenza |
+|---|---|
+| [tokio](https://tokio.rs), [futures](https://github.com/rust-lang/futures-rs) | MIT |
+| [serde](https://serde.rs), [serde_json](https://github.com/serde-rs/json) | MIT / Apache-2.0 |
+| [chromiumoxide](https://github.com/mattsse/chromiumoxide) | MIT / Apache-2.0 (controllo di Chrome via DevTools Protocol, per login e sincronizzazione) |
+| [reqwest](https://github.com/seanmonstar/reqwest), [rustls](https://github.com/rustls/rustls) | MIT / Apache-2.0 (rustls anche ISC) |
+| [regex](https://github.com/rust-lang/regex), [fancy-regex](https://github.com/fancy-regex/fancy-regex) | MIT / Apache-2.0, MIT |
+| [chrono](https://github.com/chronotope/chrono), [chrono-tz](https://github.com/chronotope/chrono-tz) | MIT / Apache-2.0 |
+| [uuid](https://github.com/uuid-rs/uuid), [base64](https://github.com/marshallpierce/rust-base64), [percent-encoding](https://github.com/servo/rust-url), [dirs](https://github.com/dirs-dev/dirs-rs), [gethostname](https://github.com/swsnr/gethostname.rs), [libc](https://github.com/rust-lang/libc) | MIT / Apache-2.0 |
+| [trash](https://github.com/Byron/trash-rs) | MIT |
 
 ## Scaricati al primo uso (non ridistribuiti)
 

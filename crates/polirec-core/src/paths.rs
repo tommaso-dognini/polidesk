@@ -52,7 +52,36 @@ pub fn socket_path() -> PathBuf {
         if t.as_os_str().len() < 100 { t } else { PathBuf::from("/tmp").join(name) }
     }
 }
-/// Root of the app sources (python/ scripts, NOTICE.md, …): set by whoever starts the daemon.
+/// Facts written by the app at every start (app folder, bundled ffmpeg), so a daemon started from the
+/// terminal finds them too.
+pub fn runtime_file() -> PathBuf {
+    app_dir().join("runtime.json")
+}
+fn runtime(key: &str) -> Option<PathBuf> {
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(runtime_file()).ok()?).ok()?;
+    v.get(key)?.as_str().filter(|s| !s.is_empty()).map(PathBuf::from)
+}
+
+/// Root of the app files (python/ scripts, NOTICE.md…): env, then runtime.json, then next to the binary
+/// (packaged app: resources/bin/polirecd → resources/app.asar.unpacked; dev: target/<profile>/ → repo).
 pub fn app_root() -> Option<PathBuf> {
-    std::env::var_os("POLIREC_APP_ROOT").map(PathBuf::from)
+    if let Some(p) = std::env::var_os("POLIREC_APP_ROOT").map(PathBuf::from) {
+        return Some(p);
+    }
+    if let Some(p) = runtime("appRoot").filter(|p| p.join("python").exists()) {
+        return Some(p);
+    }
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    [dir.join("..").join("app.asar.unpacked"), dir.join("..").join(".."), dir.join("..").join("..").join("..")].into_iter().find(|p| p.join("python").join("transcribe_cli.py").exists())
+}
+/// ffmpeg bundled with the app (ffmpeg-static), if any.
+pub fn bundled_ffmpeg() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("POLIREC_FFMPEG").map(PathBuf::from) {
+        return Some(p);
+    }
+    runtime("ffmpeg").or_else(|| {
+        let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        app_root().map(|r| r.join("node_modules").join("ffmpeg-static").join(name))
+    })
 }

@@ -325,6 +325,7 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
             }
             Ok(json!(String::from_utf8_lossy(&out.stdout).trim()))
         }
+        m if m.starts_with("api:") => crate::api_methods::call(d, &m[4..], p).await,
         _ => Err(anyhow!("Metodo sconosciuto: {method}")),
     }
 }

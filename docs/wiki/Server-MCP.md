@@ -14,9 +14,8 @@ attività, controllare orario e aule libere, con le stesse funzioni dell'app.
 Premi **«Aggiungi a Claude Code»**, oppure copia ed esegui il comando mostrato:
 
 ```bash
-claude mcp add polirec --scope user -e ELECTRON_RUN_AS_NODE=1 -- \
-  "/Applications/PoliRec.app/Contents/MacOS/PoliRec" \
-  "/Applications/PoliRec.app/Contents/Resources/app.asar/src/mcp.js"
+claude mcp add polirec --scope user -- \
+  /Applications/PoliRec.app/Contents/Resources/bin/polirec mcp
 ```
 
 Verifica con `claude mcp list`. Per toglierlo: `claude mcp remove polirec --scope user`.
@@ -29,16 +28,15 @@ Per Claude Desktop è `claude_desktop_config.json` (Impostazioni → Sviluppator
 {
   "mcpServers": {
     "polirec": {
-      "command": "/Applications/PoliRec.app/Contents/MacOS/PoliRec",
-      "args": ["/Applications/PoliRec.app/Contents/Resources/app.asar/src/mcp.js"],
-      "env": { "ELECTRON_RUN_AS_NODE": "1" }
+      "command": "/Applications/PoliRec.app/Contents/Resources/bin/polirec",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
 I percorsi dipendono dal sistema e da dove hai installato l'app: usa quelli copiati dall'app.
-Dal codice sorgente puoi usare anche `node /percorso/polirec/src/mcp.js` (oppure `npm run mcp`).
+Dal codice sorgente: `cargo run -p polirec -- mcp` (oppure `npm run mcp`). Il server MCP è un client di `polirecd`: le operazioni lunghe (sincronizzazione, trascrizione) usano le stesse code dell'app.
 
 ## Strumenti
 

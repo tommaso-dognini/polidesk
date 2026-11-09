@@ -30,6 +30,8 @@ struct SyncState {
     current: Option<String>,
     running: bool,
     last_auto: Option<Instant>,
+    /// per-course options of the next run (CLI / MCP): limit, materials, dry run
+    opts: HashMap<String, Value>,
 }
 
 pub struct Daemon {
@@ -459,6 +461,25 @@ impl Daemon {
     }
 
     // ───────── sync queue (priority = order of courses in the dashboard) ─────────
+    /// Queue one course with options and wait for it to finish (CLI / MCP).
+    pub async fn sync_and_wait(self: &Arc<Self>, id: &str, opts: Value) -> Result<Value> {
+        let mut ev = self.events.subscribe();
+        self.sync.lock().unwrap().opts.insert(id.to_string(), opts);
+        self.enqueue_sync(Some(vec![id.to_string()]));
+        loop {
+            match ev.recv().await {
+                Ok(e) if util::s(&e, "type") == "sync-course" && util::s(&e, "course") == id => match util::s(&e, "state") {
+                    "done" => return Ok(e["result"].clone()),
+                    "error" => bail!("{}", util::s(&e, "error")),
+                    _ => {}
+                },
+                Ok(e) if util::s(&e, "type") == "sync-state" && e["syncing"] == json!(false) => bail!("Sincronizzazione interrotta"),
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => bail!("Sincronizzazione interrotta"),
+            }
+        }
+    }
+
     pub fn enqueue_sync(self: &Arc<Self>, ids: Option<Vec<String>>) {
         let all: Vec<Value> = config::courses(&config::load()).to_vec();
         let wanted: Vec<String> = match ids.filter(|v| !v.is_empty()) {
@@ -555,7 +576,15 @@ impl Daemon {
     async fn sync_one(self: &Arc<Self>, c: &Value) -> Result<Value> {
         let id = util::s(c, "id").to_string();
         let s = config::load()["settings"].clone();
-        let opts = sync::Opts { parallel: (util::f(&s, "parallelDownloads") as usize).max(1), stop: self.stop_sync.clone(), ..Default::default() };
+        let o = self.sync.lock().unwrap().opts.remove(&id).unwrap_or(Value::Null);
+        let opts = sync::Opts {
+            parallel: (if util::f(&o, "parallel") > 0.0 { util::f(&o, "parallel") } else { util::f(&s, "parallelDownloads") } as usize).max(1),
+            stop: self.stop_sync.clone(),
+            limit: o["limit"].as_u64().filter(|l| *l > 0).map(|l| l as usize),
+            materials: o["materials"].as_bool(),
+            only_materials: util::b(&o, "onlyMaterials"),
+            dry_run: util::b(&o, "dryRun"),
+        };
         let d = self.clone();
         let (cid, course) = (id.clone(), c.clone());
         let emit: Emit = Arc::new(move |evt: Value| {

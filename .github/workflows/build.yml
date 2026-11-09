@@ -1,5 +1,5 @@
 # Builds installers for macOS, Windows and Linux (each on its own OS, so the bundled
-# ffmpeg binary matches the platform). Artifacts are attached to the workflow run.
+# ffmpeg binary and the Rust backend match the platform; macOS gets universal binaries). Artifacts are attached to the workflow run.
 name: build
 on:
   push:
@@ -16,8 +16,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - run: npm ci
       - run: npm run build:editor
+      - run: node scripts/build-rust.js
       - run: npx electron-builder --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

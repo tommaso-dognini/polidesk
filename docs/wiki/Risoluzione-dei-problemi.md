@@ -39,6 +39,7 @@ Se una pagina del Politecnico non si comporta come previsto, screenshot e HTML v
 | «Accesso degli assistenti AI disattivato» | Attiva *Impostazioni → Assistenti AI e automazioni → Assistenti AI (MCP)* |
 | Claude non vede gli strumenti | `claude mcp list` deve mostrare `polirec`. Se hai spostato l'app, registrala di nuovo con il comando aggiornato |
 | `polirec: command not found` | Copia l'alias dalle Impostazioni nel tuo `~/.zshrc` o `~/.bashrc` e apri un nuovo terminale |
+| «polirecd non risponde» | `polirec daemon stop`, poi riapri l'app (o rilancia il comando): il server riparte da solo |
 | «Corso non trovato» | `polirec list` mostra i nomi e i numeri validi |
 
 ## macOS

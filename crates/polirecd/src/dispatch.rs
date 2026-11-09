@@ -29,8 +29,12 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
     tokio::task::spawn_blocking(f).await.map_err(|e| anyhow!("{e}"))?
 }
 
-pub async fn call(d: &Arc<Daemon>, _client: &str, method: &str, p: Value) -> Result<Value> {
+pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Result<Value> {
     let d = d.clone();
+    // AI assistants (MCP) are opt-in: checked on every call, so enabling it in the app needs no restart
+    if client == "mcp" && !util::b(&config::load()["settings"]["integrations"], "assistant") {
+        bail!("Accesso degli assistenti AI disattivato. Attivalo in PoliRec → Impostazioni → Integrazioni → «Assistenti AI (MCP)».");
+    }
     match method {
         "daemon:info" => Ok(json!({ "version": env!("CARGO_PKG_VERSION"), "pid": std::process::id(), "dataDir": polirec_core::paths::app_dir(), "socket": polirec_core::paths::socket_path() })),
         "daemon:shutdown" => {

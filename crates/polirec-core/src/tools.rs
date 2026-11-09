@@ -29,9 +29,9 @@ pub fn rescan() {
     CACHE.lock().unwrap().clear();
 }
 
-/// ffmpeg: system one, else the one bundled with the app (POLIREC_FFMPEG, set by the UI).
+/// ffmpeg: system one, else the one bundled with the app.
 pub fn ffmpeg() -> Option<PathBuf> {
-    which("ffmpeg").or_else(|| std::env::var_os("POLIREC_FFMPEG").map(PathBuf::from).filter(|p| p.is_file()))
+    which("ffmpeg").or_else(|| crate::paths::bundled_ffmpeg().filter(|p| p.is_file()))
 }
 
 /// PATH for child processes (Whisper needs ffmpeg; AI CLIs often live in Homebrew/~/.local).

@@ -8,54 +8,84 @@ npm install
 npm start
 ```
 
-Requisiti: **Node.js 22+**, **Google Chrome**, Git. Per la trascrizione il setup dell'app crea `~/.polirec/venv` (Python 3.10+, oppure uv).
+Requisiti: **Node.js 22+**, **Rust** stable ([rustup](https://rustup.rs)), **Google Chrome**, Git. Per la trascrizione il setup dell'app crea `~/.polirec/venv` (Python 3.10+, oppure uv).
 
 ## Script npm
 
 | Comando | Cosa fa |
 |---|---|
-| `npm start` | Compila l'editor (`prestart`) e avvia l'app Electron |
+| `npm start` | Compila l'editor e il backend Rust (`prestart`) e avvia l'app Electron |
+| `npm run build:rust` | Compila `polirecd` e `polirec` in release |
+| `npm run daemon` | Avvia `polirecd` in primo piano (log sul terminale) |
 | `npm run cli -- <comando>` | Riga di comando (vedi [Riga di comando](Riga-di-comando.md)) |
 | `npm run mcp` | Server MCP su stdio (vedi [Server MCP](Server-MCP.md)) |
 | `npm run build:editor` | Crea il bundle CodeMirror, markdown-it e KaTeX in `src/renderer/vendor/editor.js` (esbuild) |
-| `npm run build:vendor` | Converte polimi-schedule-js (ESM) in un bundle CommonJS |
-| `npm run dist` | Installer per il sistema corrente (electron-builder) |
+| `npm run dist` | Installer per il sistema corrente: compila il backend (su macOS binari universali arm64 + x64, `scripts/build-rust.js`) e lo include in `resources/bin` |
 | `npm run dist:mac` / `dist:win` / `dist:linux` | Installer per una piattaforma, da eseguire su quel sistema |
+
+## Architettura
+
+```
+ Electron (interfaccia)      polirec (CLI)      polirec mcp (Claude & co.)
+          │                       │                        │
+          └──────── socket locale, JSON a righe ───────────┘
+                                  │
+                       polirecd (Rust, sempre attivo)
+     configurazione · corsi · appunti · code di sync, trascrizione e AI · indice semantico
+          │                 │                    │                    │
+   Chrome via CDP     aria2c / ffmpeg     worker Python        CLI AI (agy, claude, gemini)
+   (login, WeBeep)    (download)          (Whisper, fastembed)
+```
+
+**polirecd** fa tutto ciò che non è interfaccia. Parte da solo alla prima richiesta (app, CLI o MCP) e resta attivo
+anche a finestra chiusa, così download, trascrizioni e note AI continuano. Un solo processo possiede code, profilo
+di Chrome e indice: app, CLI e MCP vedono sempre lo stesso stato. In memoria occupa circa 12 MB.
+
+Protocollo (`crates/polirec-core/src/rpc.rs`): un oggetto JSON per riga su un socket Unix (`~/.polirec/polirecd.sock`,
+permessi 0600) o una named pipe su Windows.
+
+```
+→ {"id": 7, "method": "notes:list", "params": "<id corso>"}
+← {"id": 7, "result": [...]}          oppure  {"id": 7, "error": {"message": "..."}}
+← {"event": {"type": "log", ...}}     eventi, dopo "subscribe"
+```
+
+I metodi hanno lo stesso nome dei canali IPC dell'interfaccia (`course:add`, `notes:read`…), quindi `src/main.js`
+li inoltra senza tradurli. CLI e MCP usano i metodi `api:*`.
 
 ## Struttura
 
 ```
+crates/
+├── polirec-core/        tutta la logica (libreria)
+│   ├── rpc.rs           protocollo e client del server
+│   ├── config.rs · library.rs · indexpage.rs   configurazione, manifest, INDICE.html
+│   ├── browser.rs       Chrome via DevTools Protocol (chromiumoxide), profilo persistente, login assistito
+│   ├── webeep.rs · recman.rs · webex.rs · materials.rs   ricerca delle sorgenti e del materiale
+│   ├── sync.rs · downloader.rs   sincronizzazione, download paralleli (aria2c, downloader interno, ffmpeg per HLS)
+│   ├── transcriber.rs · cleaner.rs · setup.rs   coda di trascrizione, pulizia, setup per l'hardware
+│   ├── ai.rs · search.rs         strumenti AI, ricerca semantica (worker Python)
+│   ├── schedule.rs · timetable.rs · rooms.rs     orario (port di polimi-schedule-js), calendario, aule libere
+│   ├── notes.rs · workspace.rs · cloud.rs · integrations.rs
+│   └── api.rs           funzioni per CLI e MCP
+├── polirecd/            il server: socket, metodi, code (sync → trascrizione → AI → indice)
+└── polirec/             CLI e server MCP (client del server)
 src/
-├── main.js            processo principale: finestre, IPC, code di sync, trascrizione e AI, protocollo media://
-├── ipc-extra.js       IPC di appunti, calendario, aule, cloud, integrazioni, assistenti
-├── preload.js         API esposta al renderer (window.polirec)
-├── cli.js             riga di comando
-├── mcp.js             server MCP (stdio)
-├── core/              logica senza Electron, usabile da app, CLI e MCP
-│   ├── api.js         livello di servizio condiviso da CLI e MCP
-│   ├── browser.js     Chrome (puppeteer-core) con profilo persistente e login assistito
-│   ├── webeep.js · recman.js · webex.js · materials.js   ricerca delle sorgenti e del materiale
-│   ├── sync.js · downloader.js    sincronizzazione e download in parallelo (aria2c o downloader interno)
-│   ├── transcriber.js · cleaner.js · setup.js            trascrizione, pulizia, setup per l'hardware
-│   ├── ai.js · search.js          strumenti AI (agy/claude/gemini), ricerca semantica (worker Python)
-│   ├── library.js · indexpage.js  configurazione, manifest, INDICE.html
-│   ├── notes.js · workspace.js · cloud.js · integrations.js
-│   └── timetable.js · rooms.js    orario e aule libere
-├── renderer/          interfaccia (HTML, CSS e JS senza framework)
-│   ├── app.js         router, dashboard, corso, lezione, impostazioni
-│   ├── views.js       appunti, calendario, Pomodoro, impostazioni aggiuntive
-│   ├── ai-ui.js       ricerca, command palette, coda AI
-│   └── rooms-ui.js    aule libere con mappa (Leaflet)
-├── renderer-src/editor.js   sorgente del bundle dell'editor
-└── vendor/polimi-schedule-js/
+├── main.js              Electron: finestra, dialoghi, PDF, protocollo media://, ponte verso polirecd
+├── daemon-client.js     client del socket: avvia, aggiorna e riconnette polirecd
+├── preload.js           API esposta al renderer (window.polirec)
+├── renderer/            interfaccia (HTML, CSS e JS senza framework)
+└── renderer-src/editor.js   sorgente del bundle dell'editor
 python/
-├── transcribe_cli.py  mlx-whisper, faster-whisper, openai-whisper, Parakeet
-└── semantic.py        indice e ricerca semantica (fastembed, pypdf)
+├── transcribe_cli.py    mlx-whisper, faster-whisper, openai-whisper, Parakeet
+└── semantic.py          indice e ricerca semantica (fastembed, pypdf)
 ```
 
 Regole:
-- tutto ciò che non è interfaccia va in `src/core/`, senza dipendenze da Electron, così CLI e MCP lo possono riusare;
-- le nuove funzioni di CLI e MCP passano da `src/core/api.js`.
+- tutto ciò che non è interfaccia va in `crates/polirec-core`, esposto da un metodo di `polirecd`;
+- un nuovo canale dell'interfaccia è un metodo con lo stesso nome in `crates/polirecd/src/dispatch.rs` o `methods.rs`:
+  `src/main.js` lo inoltra da solo;
+- le funzioni per CLI e MCP stanno in `api.rs` e passano dai metodi `api:*`.
 
 ## Test con dati isolati
 
@@ -63,7 +93,7 @@ Non usare mai la tua configurazione reale per le prove. `POLIREC_HOME` sposta tu
 
 ```bash
 POLIREC_HOME=/tmp/polirec-test npm start
-POLIREC_HOME=/tmp/polirec-test node src/cli.js list
+POLIREC_HOME=/tmp/polirec-test npm run cli -- list    # ogni POLIREC_HOME ha il suo polirecd
 ```
 
 ### Screenshot automatici (smoke test)
@@ -86,7 +116,10 @@ Gli errori del renderer compaiono nel terminale come `[renderer] …`.
 | `POLIREC_CHROME` | Percorso di Chrome, se non viene trovato da solo |
 | `POLIREC_NO_ARIA2` | Usa il downloader interno anche se `aria2c` è installato |
 | `POLIREC_SMOKE`, `POLIREC_SMOKE_JS` | Screenshot automatico (vedi sopra) |
-| `ELECTRON_RUN_AS_NODE=1` | Esegue CLI e MCP con il runtime dell'app installata |
+| `POLIREC_APP_ROOT`, `POLIREC_FFMPEG` | Cartella dell'app (script `python/`) e ffmpeg incluso; di solito le scrive l'app in `~/.polirec/runtime.json` |
+| `POLIRECD` | Percorso di `polirecd` da usare al posto di quello incluso |
+
+Test del backend: `cargo test`. Gli strumenti in `crates/polirec-core/examples/` confrontano parser dell'orario e pulizia delle trascrizioni con i file di prova.
 
 ## Rilascio
 

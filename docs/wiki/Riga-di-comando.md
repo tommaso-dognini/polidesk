@@ -1,23 +1,31 @@
 # Riga di comando (`polirec`)
 
-La CLI usa lo stesso motore e gli stessi dati dell'app (`~/.polirec` e le cartelle dei corsi). Si può usare anche con
-l'app aperta: ogni scrittura salva un file intero alla volta, in modo atomico.
+La CLI è un programma nativo (Rust) che parla con **polirecd**, il server locale di PoliRec: stesso motore, stessi
+dati e stesse code dell'app. Si può usare con l'app aperta o chiusa; se il server non è attivo parte da solo.
 
 ## Come averla
 
-**Con l'app installata**, non serve Node.js:
+**Con l'app installata** il binario è dentro l'app (`Resources/bin/polirec`):
 *Impostazioni → Assistenti AI e automazioni → Riga di comando → Copia alias*, poi incolla la riga in `~/.zshrc` o `~/.bashrc`.
-L'alias è del tipo:
+Su macOS l'alias è del tipo:
 
 ```bash
-alias polirec='ELECTRON_RUN_AS_NODE=1 "/Applications/PoliRec.app/Contents/MacOS/PoliRec" "/Applications/PoliRec.app/Contents/Resources/app.asar/src/cli.js"'
+alias polirec=/Applications/PoliRec.app/Contents/Resources/bin/polirec
 ```
 
 **Dal codice sorgente**:
 
 ```bash
-npm run cli -- <comando>      # oppure: node src/cli.js <comando>
-npm link                      # installa il comando «polirec» nel PATH
+npm run cli -- <comando>          # oppure: cargo run -p polirec -- <comando>
+cargo install --path crates/polirec --locked && cargo install --path crates/polirecd --locked   # «polirec» e «polirecd» nel PATH
+```
+
+### Il server `polirecd`
+
+```bash
+polirec daemon            # stato: versione, pid, cartella dati, socket
+polirec daemon stop       # ferma il server (ripartirà al prossimo comando o all'apertura dell'app)
+polirec call <metodo> '<json>'   # chiamata diretta a un metodo del server (per script avanzati)
 ```
 
 ## Come indicare corsi e lezioni
@@ -124,8 +132,8 @@ polirec rooms --from 14:00 --hours 3
 polirec sync --limit 2
 ```
 
-## Script di verifica
+## Solo controllo, senza scaricare
 
 ```bash
-node scripts/discover-all.js out.json   # sola lettura: trova le sorgenti di tutti i tuoi corsi WeBeep, senza scaricare
+polirec sync --dry-run     # trova corsi, archivi e lezioni di tutti i corsi, senza scaricare nulla
 ```

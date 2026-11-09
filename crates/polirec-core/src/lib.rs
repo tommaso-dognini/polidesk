@@ -1,6 +1,7 @@
 //! PoliRec backend: everything the app does, without any UI.
 //! Used by `polirecd` (the always-on daemon) and, through it, by the Electron UI, the CLI and the MCP server.
 pub mod ai;
+pub mod api;
 pub mod browser;
 pub mod cleaner;
 pub mod cloud;
