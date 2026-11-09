@@ -32,6 +32,7 @@ class DaemonClient {
     /** bin: path of polirecd; env: extra env for it; onEvent(evt) */
     constructor({ bin, env = {}, onEvent = () => { }, log = () => { } }) {
         this.bin = bin; this.env = env; this.onEvent = onEvent; this.log = log;
+        this.required = [];   // methods the UI needs (set by main.js from the preload channels)
         this.sock = null; this.buf = ''; this.n = 0; this.wait = new Map(); this.ready = null; this.closing = false;
     }
 
@@ -67,9 +68,13 @@ class DaemonClient {
             const hello = await this.call('hello', { client: 'electron', protocol: PROTOCOL });
             // the app was updated: replace the old daemon (it keeps running across app restarts)
             const want = this.bundledVersion();
-            let newer = false;
-            try { newer = hello.exe && path.resolve(hello.exe) === path.resolve(this.bin) && fs.statSync(this.bin).mtimeMs > hello.started + 1000; } catch (e) { }
-            if ((want && hello.version !== want) || newer) {
+            // outdated: other version, a newer binary on disk, a build that predates these checks, or missing
+            // methods the UI needs (same version number during development)
+            let newer = !hello.started;
+            try { newer = newer || (hello.exe && path.resolve(hello.exe) === path.resolve(this.bin) && fs.statSync(this.bin).mtimeMs > hello.started + 1000); } catch (e) { }
+            const missing = this.required.filter(m => !(hello.methods || []).includes(m));
+            if (((want && hello.version !== want) || newer || missing.length) && !this.replaced) {
+                this.replaced = true;   // once per app start: never loop if the bundled daemon is the old one
                 this.log(`polirecd ${hello.version} → ${want}`);
                 await this.call('daemon:shutdown').catch(() => { });
                 this.detach();

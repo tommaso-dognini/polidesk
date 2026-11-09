@@ -120,6 +120,20 @@ impl Daemon {
             let c = config::load();
             if util::b(&c["settings"], "setupDone") {
                 d.ai_backfill(None);
+                // a restarted daemon has an empty queue: pick up what is downloaded but not transcribed yet
+                if util::b(&c["settings"]["transcription"], "auto") {
+                    for x in config::courses(&c) {
+                        let dir = lib::dir_of(x);
+                        if !dir.exists() {
+                            continue;
+                        }
+                        for r in lib::with_file_status(&dir, &lib::load_manifest(&dir)) {
+                            if util::b(&r, "videoExists") && !util::truthy(r.get("transcript")) && lib::followed(x.get("teachers"), &r) {
+                                d.queue_transcription(x, &r);
+                            }
+                        }
+                    }
+                }
                 for x in config::courses(&c) {
                     d.schedule_index(Some(util::s(x, "id")), 15000);
                 }

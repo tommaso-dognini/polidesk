@@ -186,6 +186,7 @@ handle('update:check', async () => {
 function forwardAll() {
     const channels = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8').match(/invoke\('([^']+)'/g).map(s => s.slice(8, -1));
     for (const ch of new Set(channels)) if (!local.has(ch)) forward(ch);
+    daemon.required = [...new Set(channels)].filter(ch => !local.has(ch));
 }
 
 // ---------- window ----------

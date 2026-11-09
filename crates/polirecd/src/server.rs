@@ -22,9 +22,16 @@ pub async fn run() -> Result<()> {
     eprintln!("polirecd {} · dati {} · socket {}", env!("CARGO_PKG_VERSION"), paths::app_dir().display(), paths::socket_path().display());
     d.start_background();
     let shutdown = d.shutdown.clone();
+    let d = d.clone();
     tokio::select! {
         r = listen(d.clone()) => r,
-        _ = shutdown.notified() => { cleanup(); Ok(()) }
+        _ = shutdown.notified() => {
+            // close Chrome cleanly: an orphan would keep the profile locked for the next daemon
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(8), d.close_session()).await;
+            d.transcriber.cancel_all();
+            cleanup();
+            Ok(())
+        }
         _ = tokio::signal::ctrl_c() => { cleanup(); Ok(()) }
     }
 }
