@@ -24,7 +24,7 @@ async function syncCourse(session, course, opts = {}) {
 
     // 1. course
     log('🔎 Cerco il corso su WeBeep...');
-    const wc = await webeep.resolveCourse(session, course.webeepId || course.input);
+    const wc = await webeep.resolveCourse(session, course.webeepId ? `webeep:${course.webeepId}` : course.input);
     manifest.course = { id: wc.id, fullname: wc.fullname, url: wc.url || `${webeep.WEBEEP}/course/view.php?id=${wc.id}` };
     course.webeepId = wc.id; course.name = course.name || wc.fullname;
     log(`  ✓ ${wc.fullname} (id ${wc.id})`);
@@ -62,7 +62,7 @@ async function syncCourse(session, course, opts = {}) {
                     key: `webex-${id}`, rec: {
                         source: 'webex', sourceLabel: src.label, webexUrl: playback, topic: info.recordName || src.label,
                         isoDate: created ? new Date(created.getTime() - created.getTimezoneOffset() * 60000).toISOString().slice(0, 16) : null,
-                        duration: info.duration ? Math.round(info.duration / 60) + ' min' : '',
+                        duration: info.duration ? Math.round(info.duration / 60000) + ' min' : '',
                     }
                 });
             } else if (src.type === 'direct') {
@@ -120,7 +120,7 @@ async function syncCourse(session, course, opts = {}) {
             if (r.webexUrl) {
                 const info = await webex.getStreamInfo(session, r.webexUrl, { password: course.videoPassword || '' });
                 candidates = webex.downloadCandidates(info);
-                if (!r.durationSec && info.duration) r.durationSec = info.duration;
+                if (!r.durationSec && info.duration) r.durationSec = Math.round(info.duration / 1000);
             } else if (r.source === 'youtube') {
                 await ytdlp(r.directUrl, dest, progress); candidates = null;
             } else if (r.directUrl) {

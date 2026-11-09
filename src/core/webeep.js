@@ -32,6 +32,8 @@ async function enrolledCourses(session) {
 
 function parseCourseInput(input) {
     input = String(input).trim();
+    const w = input.match(/^webeep:(\d+)$/);
+    if (w) return { id: w[1], raw: w[1] };
     try {
         const u = new URL(input);
         if (u.host.includes('webeep.polimi.it')) {
@@ -61,6 +63,8 @@ async function resolveCourse(session, input) {
     if (parsed.url) throw new Error('URL non riconosciuto: usa il link WeBeep del corso, il codice o il nome.');
 
     const q = parsed.query.toLowerCase();
+    const exactId = courses.find(c => String(c.id) === q);
+    if (exactId) return exactId;
     let matches = courses.filter(c => [c.fullname, c.shortname, c.idnumber].join(' ').toLowerCase().includes(q));
     if (matches.length === 0) {
         const words = q.split(/\s+/).filter(Boolean);

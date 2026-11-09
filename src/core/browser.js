@@ -34,7 +34,7 @@ const LOGIN_URL_PATTERNS = [
     /login\.polimi\.it/,
     /idp\.polimi\.it/,
     /posteid\.poste\.it/, /infocert\.it/, /aruba\.it/, /namirial/, /sielte/, /tim\.it/, /lepida/, /intesa\.it/, /register\.it/, /etna/, /teamsystem/,
-    /webex\.com\/.*(signin|login|idbroker)/i, /idbroker\.webex\.com/,
+    /webex\.com\/.*(signin|login)/i, /idbroker(-\w+)?\.webex\.com/,
 ];
 
 class Session {
