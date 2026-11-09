@@ -15,7 +15,7 @@ const TEMPLATES = {
     appunti: {
         label: 'Appunti strutturati',
         suffix: 'appunti',
-        prompt: `Sei un tutor universitario del Politecnico di Milano. Riceverai (su stdin) la trascrizione automatica di una lezione, che può contenere errori di riconoscimento vocale.
+        prompt: `Sei un tutor universitario del Politecnico di Milano. Riceverai la trascrizione automatica di una lezione, che può contenere errori di riconoscimento vocale.
 Scrivi APPUNTI COMPLETI e ben strutturati in Markdown, nella stessa lingua della lezione:
 - titolo, poi indice degli argomenti;
 - sezioni con titoli, definizioni, formule in LaTeX ($...$ / $$...$$), passaggi chiave, esempi fatti dal docente;
@@ -27,17 +27,17 @@ Rispondi SOLO con il Markdown degli appunti.`,
     riassunto: {
         label: 'Riassunto breve',
         suffix: 'riassunto',
-        prompt: `Riceverai (su stdin) la trascrizione automatica di una lezione universitaria. Scrivi un RIASSUNTO in Markdown (max ~1 pagina), nella lingua della lezione: argomenti trattati, concetti principali, collegamenti con lezioni precedenti/successive se menzionati. Rispondi SOLO con il Markdown.`,
+        prompt: `Riceverai la trascrizione automatica di una lezione universitaria. Scrivi un RIASSUNTO in Markdown (max ~1 pagina), nella lingua della lezione: argomenti trattati, concetti principali, collegamenti con lezioni precedenti/successive se menzionati. Rispondi SOLO con il Markdown.`,
     },
     spiegazione: {
         label: 'Spiegazione dei concetti difficili',
         suffix: 'spiegazione',
-        prompt: `Riceverai (su stdin) la trascrizione automatica di una lezione universitaria. Individua i 3-6 concetti più difficili e spiegali in modo chiaro e intuitivo in Markdown, nella lingua della lezione: intuizione, formalizzazione (LaTeX), esempio numerico o pratico, errori comuni. Rispondi SOLO con il Markdown.`,
+        prompt: `Riceverai la trascrizione automatica di una lezione universitaria. Individua i 3-6 concetti più difficili e spiegali in modo chiaro e intuitivo in Markdown, nella lingua della lezione: intuizione, formalizzazione (LaTeX), esempio numerico o pratico, errori comuni. Rispondi SOLO con il Markdown.`,
     },
     flashcard: {
         label: 'Flashcard / domande',
         suffix: 'flashcard',
-        prompt: `Riceverai (su stdin) la trascrizione automatica di una lezione universitaria. Crea 15-25 flashcard in Markdown per ripassare, nella lingua della lezione, nel formato:
+        prompt: `Riceverai la trascrizione automatica di una lezione universitaria. Crea 15-25 flashcard in Markdown per ripassare, nella lingua della lezione, nel formato:
 ### D: domanda
 R: risposta concisa
 Includi sia domande teoriche sia di applicazione. Rispondi SOLO con il Markdown.`,
@@ -62,7 +62,13 @@ function runPrompt(provider, prompt, stdinText, { model = '', cwd, onChunk = () 
     if (!bin) return Promise.reject(new Error(`${p.label} non trovato nel PATH`));
     let args;
     if (provider === 'claude') { args = ['-p', prompt, '--output-format', 'text']; if (model) args.push('--model', model); }
-    else if (provider === 'agy') { args = ['-p', prompt, '--output-format', 'text']; if (model) args.push('--model', model); }
+    else if (provider === 'agy') {
+        // agy's print mode does not read stdin as text: inline the transcript in the prompt
+        const full = stdinText ? `${prompt}\n\n<trascrizione>\n${stdinText}\n</trascrizione>` : prompt;
+        stdinText = '';
+        args = ['-p', full, '--output-format', 'text'];
+        if (model) args.push('--model', model);
+    }
     else { args = ['-p', prompt]; if (model) args.push('-m', model); }
     return new Promise((resolve, reject) => {
         const child = spawn(bin, args, { cwd: cwd || process.cwd(), env: env(), signal });
@@ -71,6 +77,7 @@ function runPrompt(provider, prompt, stdinText, { model = '', cwd, onChunk = () 
         child.stderr.on('data', d => err += d);
         child.on('error', reject);
         child.on('close', code => code === 0 && out.trim() ? resolve(out.trim() + '\n') : reject(new Error(`${p.label} exit ${code}: ${(err || out).slice(-500)}`)));
+        child.stdin.on('error', () => { });
         child.stdin.end(stdinText || '');
     });
 }
@@ -101,8 +108,8 @@ async function generateNote({ provider, model, template, transcriptPath, notesDi
     const t = TEMPLATES[template] || TEMPLATES.appunti;
     const text = fs.readFileSync(transcriptPath, 'utf8');
     const header = title ? `Lezione: ${title}\n\n` : '';
-    const md = await runPrompt(provider, t.prompt, header + text, { model, cwd: notesDir, onChunk });
     fs.mkdirSync(notesDir, { recursive: true });
+    const md = await runPrompt(provider, t.prompt, header + text, { model, cwd: notesDir, onChunk });
     const stem = path.basename(transcriptPath).replace(/\.(txt|srt|vtt|json)$/i, '');
     const name = `${stem} - ${t.suffix}.md`;
     fs.writeFileSync(path.join(notesDir, name), md);

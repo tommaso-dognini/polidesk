@@ -28,7 +28,7 @@ function pick(cfg, sel) {
 (async () => {
     const cfg = lib.loadConfig();
     if (cmd === 'courses') {
-        const s = new Session();
+        const s = new Session({ email: cfg.settings.polimiEmail });
         try { (await webeep.enrolledCourses(s)).sort((a, b) => b.id - a.id).forEach(c => console.log(`webeep:${c.id}\t${c.fullname}`)); }
         finally { await s.close(); }
     } else if (cmd === 'add') {
@@ -47,7 +47,7 @@ function pick(cfg, sel) {
         const dryRun = bool('--dry-run');
         const parallel = +flag('-j', cfg.settings.parallelDownloads);
         const list = pick(cfg, args);
-        const s = new Session({ onLoginRequired: () => console.log('\x07') });
+        const s = new Session({ email: cfg.settings.polimiEmail, onLoginRequired: () => console.log('\x07') });
         let stop = false;
         process.on('SIGINT', () => { if (stop) process.exit(130); stop = true; console.log('\n⏹  Interrompo dopo i download in corso (Ctrl+C di nuovo per uscire subito)'); });
         try {

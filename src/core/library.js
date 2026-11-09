@@ -14,8 +14,9 @@ const { CONFIG_FILE } = require('./paths');
 const DEFAULT_SETTINGS = {
     parallelDownloads: 3,
     transcription: { auto: true, model: 'small', language: 'auto', format: 'txt', python: 'python3' },
-    ai: { provider: 'claude', model: '', autoNotes: false },
+    ai: { provider: 'agy', model: '', autoNotes: false },
     defaultRoot: '',
+    polimiEmail: '',
 };
 
 function loadConfig() {
@@ -23,7 +24,17 @@ function loadConfig() {
     try { cfg = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (e) { }
     cfg.courses = cfg.courses || [];
     cfg.settings = deepMerge(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), cfg.settings || {});
+    if (!cfg.settings.polimiEmail) cfg.settings.polimiEmail = legacyEmail();
     return cfg;
+}
+
+// Reuse the e-mail saved by PoliWebex (config.json next to poliwebex.js), if any
+function legacyEmail() {
+    const os = require('os');
+    for (const p of [path.join(__dirname, '..', '..', 'legacy', 'config.json'), path.join(os.homedir(), 'Documents', 'PoliWebex', 'config.json')]) {
+        try { const e = JSON.parse(fs.readFileSync(p, 'utf8')).email; if (e) return e; } catch (e) { }
+    }
+    return '';
 }
 
 function saveConfig(cfg) {

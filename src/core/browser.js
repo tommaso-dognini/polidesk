@@ -38,8 +38,9 @@ const LOGIN_URL_PATTERNS = [
 ];
 
 class Session {
-    constructor({ log = console.log, onLoginRequired = () => { }, headless = false } = {}) {
+    constructor({ log = console.log, onLoginRequired = () => { }, headless = false, email = '' } = {}) {
         this.log = log;
+        this.email = email; // PoliMi email, typed into the WebEx/Cisco login page
         this.onLoginRequired = onLoginRequired;
         this.headless = headless;
         this.browser = null;
@@ -127,6 +128,7 @@ class Session {
         let deadline = Date.now() + timeout;
         let notified = false;
         let loginSince = 0;
+        let assisted = '';
         while (true) {
             const u = page.url();
             let done = false;
@@ -139,12 +141,13 @@ class Session {
                 // SSO hops (aunicalogin.jsp, idbroker…) often pass through by themselves: only bother
                 // the user if we're stuck on a login page for a few seconds.
                 if (!loginSince) loginSince = Date.now();
-                if (Date.now() - loginSince > 6000 && !notified) {
+                const host = u.split('?')[0];
+                if (assisted !== host) { assisted = host; await this.autoAssistLogin(page).catch(() => { }); }
+                if (Date.now() - loginSince > 10000 && !notified) {
                     notified = true;
                     deadline = Date.now() + loginTimeout;
                     this.log('🔐 Login richiesto: completa l\'accesso nella finestra di Chrome...');
                     this.onLoginRequired(u);
-                    await this.autoAssistLogin(page).catch(() => { });
                     try { await page.bringToFront(); } catch (e) { }
                 }
                 if (!notified) deadline = Math.max(deadline, Date.now() + timeout);
@@ -159,7 +162,28 @@ class Session {
 
     // Click obvious "go to SSO" buttons so the user lands straight on the PoliMi login.
     async autoAssistLogin(page) {
+        await sleep(800);
         const u = page.url();
+        // Cisco WebEx identity broker asks for the e-mail, then federates to the PoliMi SSO
+        if (/idbroker(-\w+)?\.webex\.com/.test(u) && this.email) {
+            const typed = await page.evaluate(email => {
+                const i = document.querySelector('#IDToken1, input[type="email"], input[name="email"]');
+                if (!i || i.offsetParent === null) return false;
+                i.focus(); i.value = email;
+                i.dispatchEvent(new Event('input', { bubbles: true }));
+                i.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }, this.email);
+            if (typed) {
+                await sleep(300);
+                await page.evaluate(() => {
+                    const b = document.querySelector('#IDButton2, button[type="submit"], #md-form button');
+                    if (b && !b.disabled) b.click(); else { const f = document.querySelector('#md-form, form'); if (f) f.requestSubmit ? f.requestSubmit() : f.submit(); }
+                });
+                this.log('  ↪ email inserita su WebEx, proseguo con l\'SSO PoliMi...');
+            }
+            return;
+        }
         if (/webeep\.polimi\.it\/login\/index\.php/.test(u)) {
             await page.evaluate(() => {
                 const a = [...document.querySelectorAll('a')].find(a => /auth\/(shibboleth|saml|oauth)|auth=/.test(a.href) || /polimi|accedi con/i.test(a.innerText));

@@ -25,6 +25,7 @@ function log(msg, course) { send({ type: 'log', msg, course }); }
 function getSession() {
     if (!session) {
         session = new Session({
+            email: cfg.settings.polimiEmail,
             log: msg => log(msg),
             onLoginRequired: () => {
                 send({ type: 'login-required' });

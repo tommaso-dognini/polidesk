@@ -33,6 +33,25 @@ async function resolveToPlayback(session, url) {
  * Ask WebEx for stream info. Uses the browser's WebEx cookies; if they are missing/expired,
  * opens the playback page in the browser so SSO can (re)authenticate, then retries.
  */
+let authLock = null; // one WebEx SSO at a time; parallel downloads wait for it and reuse the ticket
+
+async function authenticate(session, playbackUrl) {
+    if (authLock) return authLock;
+    authLock = (async () => {
+        const page = await session.browser.newPage();
+        try {
+            await session.goto(playbackUrl, async (u) => {
+                if (!isPlayback(u)) return false;
+                const c = await session.cookieHeaderFor(SITE + '/');
+                return /(^|; )ticket=/.test(c);
+            }, { page, timeout: 60000 });
+            await sleep(1000);
+            await session.saveCookies();
+        } finally { await page.close().catch(() => { }); }
+    })();
+    try { await authLock; } finally { authLock = null; }
+}
+
 async function getStreamInfo(session, playbackUrl, { password = '' } = {}) {
     const id = extractRecordingId(playbackUrl);
     if (!id) throw new Error('ID registrazione WebEx non trovato in ' + playbackUrl);
@@ -49,16 +68,7 @@ async function getStreamInfo(session, playbackUrl, { password = '' } = {}) {
         if (obj && obj.code === 54001) throw new Error('Registrazione WebEx non esistente o rimossa');
         if (attempt === 0) {
             // authenticate WebEx via SSO by opening the recording page in the browser
-            const page = await session.browser.newPage();
-            try {
-                await session.goto(playbackUrl, async (u, p) => {
-                    if (!isPlayback(u)) return false;
-                    const c = await session.cookieHeaderFor(SITE + '/');
-                    return /(^|; )ticket=/.test(c);
-                }, { page, timeout: 60000 });
-                await sleep(1000);
-                await session.saveCookies();
-            } finally { await page.close().catch(() => { }); }
+            await authenticate(session, playbackUrl);
             continue;
         }
         throw new Error(`Risposta WebEx inattesa (HTTP ${r.status}): ${text.slice(0, 200)}`);

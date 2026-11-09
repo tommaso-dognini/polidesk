@@ -284,7 +284,7 @@ $('#dlg-course').addEventListener('close', () => {
 // ---------- settings ----------
 $('#btn-settings').onclick = () => {
     const s = S.settings;
-    $('#s-parallel').value = s.parallelDownloads; $('#s-root').value = s.defaultRoot || '';
+    $('#s-parallel').value = s.parallelDownloads; $('#s-email').value = s.polimiEmail || ''; $('#s-root').value = s.defaultRoot || '';
     $('#s-t-auto').checked = s.transcription.auto; $('#s-t-model').value = s.transcription.model; $('#s-t-lang').value = s.transcription.language;
     $('#s-t-format').value = s.transcription.format; $('#s-t-python').value = s.transcription.python;
     fillProviders($('#s-ai-provider')); $('#s-ai-model').value = s.ai.model; $('#s-ai-auto').checked = s.ai.autoNotes;
@@ -294,7 +294,7 @@ $('#s-root-pick').onclick = async () => { const d = await api.pickDir($('#s-root
 $('#dlg-settings').addEventListener('close', () => {
     if ($('#dlg-settings').returnValue !== 'ok') return;
     const s = {
-        parallelDownloads: Math.max(1, Math.min(8, +$('#s-parallel').value || 3)), defaultRoot: $('#s-root').value,
+        parallelDownloads: Math.max(1, Math.min(8, +$('#s-parallel').value || 3)), defaultRoot: $('#s-root').value, polimiEmail: $('#s-email').value.trim(),
         transcription: { auto: $('#s-t-auto').checked, model: $('#s-t-model').value, language: $('#s-t-lang').value, format: $('#s-t-format').value || 'txt', python: $('#s-t-python').value || 'python3' },
         ai: { provider: $('#s-ai-provider').value, model: $('#s-ai-model').value, autoNotes: $('#s-ai-auto').checked },
     };
