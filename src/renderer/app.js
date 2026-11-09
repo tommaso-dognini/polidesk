@@ -681,9 +681,13 @@ $('#act-toggle').onclick = () => $('#activity').classList.toggle('open');
 
 // ───────── events from main ─────────
 let rafPending = false;
-const soft = () => { if (rafPending) return; rafPending = true; requestAnimationFrame(() => { rafPending = false; if (!S) return; if (route.name === 'recording') { renderSidebar(); return; } $('#view').dataset.view = route.name === 'settings' || route.name === 'setup' || route.tab === 'impostazioni' ? $('#view').dataset.view : ''; render(); }); };
+// Views with their own state (editors, forms, players, async pages) must not be rebuilt on background
+// events: only the sidebar is refreshed. Data-driven lists (dashboard, lessons…) re-render.
+const isSticky = () => ['recording', 'settings', 'setup', 'notes', 'calendar', 'rooms', 'todos', 'community'].includes(route.name)
+    || ['impostazioni', 'panoramica'].includes(route.tab);
+const soft = () => { if (rafPending) return; rafPending = true; requestAnimationFrame(() => { rafPending = false; if (!S) return; if (isSticky()) { renderSidebar(); return; } $('#view').dataset.view = ''; render(); }); };
 let refreshT = null;
-const softRefresh = () => { clearTimeout(refreshT); refreshT = setTimeout(async () => { if (!['settings', 'setup'].includes(route.name) && route.tab !== 'impostazioni' && route.name !== 'recording') $('#view').dataset.view = ''; await refresh(); }, 400); };
+const softRefresh = () => { clearTimeout(refreshT); refreshT = setTimeout(async () => { if (!isSticky()) $('#view').dataset.view = ''; await refresh(); }, 400); };
 
 api.on(e => {
     switch (e.type) {
