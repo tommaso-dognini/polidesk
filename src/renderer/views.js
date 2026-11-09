@@ -696,7 +696,7 @@ window.settingsExtra = async v => {
     <div class="group"><h3>Informazioni</h3>
         ${field(`${esc(about.name)} ${esc(about.version)}`, `Electron ${esc(about.electron)} · ${esc(about.platform)} · dati in ${esc(about.dataDir)}`, '<button id="x-upd">Controlla aggiornamenti</button>')}
         ${field('Gratis e open source', 'PoliRec è gratuito per tutti gli studenti. Se ti è utile, puoi offrire un caffè allo sviluppatore ☕', about.donateUrl ? '<button class="primary" id="x-coffee">☕ Buy me a coffee</button>' : '<span class="faint">link donazioni non configurato</span>')}
-        ${field('Licenze e crediti', 'MIT · progetti della community PoliNetwork e componenti di terze parti', '<button id="x-notice">Mostra</button>')}
+        ${field('Licenze e crediti', 'Software libero GPL-3.0-or-later · progetti della community PoliNetwork e componenti di terze parti', '<button id="x-notice">Mostra</button>')}
         ${field('Avviso', 'App non ufficiale, non affiliata né approvata dal Politecnico di Milano. Usa le registrazioni solo per studio personale, nel rispetto del regolamento di Ateneo e del diritto d\'autore dei docenti.', '')}
     </div>`;
     const saveX = patch => api.saveSettings(patch).then(() => refresh());

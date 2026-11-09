@@ -1,8 +1,14 @@
 # Crediti e licenze di terze parti
 
-PoliRec è distribuito con licenza **MIT** (vedi `LICENSE`). Nasce dal lavoro della community
-studentesca del Politecnico di Milano, in particolare dei progetti raccolti da
-[PoliNetwork](https://polinetwork.org/it/projects/).
+Copyright (C) 2026 Tommaso Dognini e contributori.
+
+PoliRec è software libero: puoi ridistribuirlo e/o modificarlo secondo i termini della **GNU General Public License**
+pubblicata dalla Free Software Foundation, versione 3 o (a tua scelta) qualsiasi versione successiva
+(`GPL-3.0-or-later`, testo completo in `LICENSE`). È distribuito nella speranza che sia utile, ma SENZA ALCUNA GARANZIA.
+
+PoliRec nasce dal lavoro della community studentesca del Politecnico di Milano, in particolare dai progetti raccolti da
+[PoliNetwork](https://polinetwork.org/it/projects/). Il codice di terze parti incluso mantiene la propria licenza e la propria
+nota di copyright, riportate qui sotto. Le licenze MIT, BSD, ISC e Apache-2.0 sono compatibili con la GPL-3.0.
 
 > PoliRec è un'app **non ufficiale**: non è affiliata, approvata o supportata dal Politecnico di Milano.
 > I marchi citati appartengono ai rispettivi proprietari.
@@ -11,12 +17,14 @@ studentesca del Politecnico di Milano, in particolare dei progetti raccolti da
 
 | Progetto | Autore | Licenza | Uso in PoliRec |
 |---|---|---|---|
-| [PoliWebex](https://github.com/sup3rgiu/PoliWebex) | sup3rgiu | MIT | Base del motore di download WebEx. Il codice originale modificato è in `legacy/`. |
+| [PoliWebex](https://github.com/sup3rgiu/PoliWebex) | sup3rgiu | MIT | Base del motore di download WebEx. Il codice originale modificato è in `legacy/`, con la sua licenza (`legacy/LICENSE`, Copyright (c) 2020 SUPERGIU). |
 | [polimi-schedule-js](https://github.com/bebora/polimi-schedule-js) | bebora | MIT | **Incluso** in `src/vendor/polimi-schedule-js/` (non modificato): conversione dell'orario dei Servizi Online in eventi/iCalendar. |
 | [PoliDown](https://github.com/sup3rgiu/PoliDown) | sup3rgiu | MIT | Riferimento per il supporto futuro ai video Microsoft Stream/SharePoint. |
 | [WebXDownloader](https://github.com/jacopo-j/WebXDownloader) | jacopo-j | MIT | Riferimento per le API di download WebEx. |
 
 ## Idee reimplementate da zero (nessun codice copiato)
+
+Con la licenza GPL-3.0 il codice di questi progetti GPL potrà anche essere integrato direttamente in futuro, citandone gli autori.
 
 | Progetto | Autore | Licenza | Idea |
 |---|---|---|---|

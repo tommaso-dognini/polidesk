@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Registrazioni, appunti, calendario e strumenti di studio per gli studenti del Politecnico di Milano (app non ufficiale)",
   "main": "src/main.js",
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "scripts": {
     "start": "electron .",
     "cli": "node src/cli.js",

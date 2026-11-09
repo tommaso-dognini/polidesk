@@ -1,125 +1,127 @@
 # PoliRec
 
-App desktop **gratuita** (macOS, Windows, Linux) per gli studenti del Politecnico di Milano. Ti permette di:
+**Le lezioni del Politecnico di Milano, sul tuo computer: scaricate, trascritte e pronte da studiare.**
 
-- scaricare le **registrazioni delle lezioni** e il **materiale** dei tuoi corsi WeBeep;
-- **trascriverle** in locale, eliminando le esitazioni (ehm, mmm…);
-- studiare con **appunti in Markdown, LaTeX o Typst** e un pannello AI;
-- usare **calendario**, **aule libere**, **cose da fare** e **Pomodoro**, tutto nella stessa app.
+App desktop gratuita e open source per macOS, Windows e Linux. Trova le registrazioni dei tuoi corsi WeBeep,
+le scarica, le trascrive in locale e ti aiuta a studiarle: appunti, flashcard, domande d'esame, ricerca nei contenuti,
+calendario, aule libere e Pomodoro, tutto in un'unica app.
 
-> App **non ufficiale**, non affiliata al Politecnico di Milano. Usa le registrazioni solo per studio personale.
-> Vedi [PRIVACY.md](PRIVACY.md).
+[![Licenza: GPL v3](https://img.shields.io/badge/licenza-GPL--3.0--or--later-blue.svg)](LICENSE)
+![Piattaforme](https://img.shields.io/badge/piattaforme-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 
-Nata da [PoliWebex](https://github.com/sup3rgiu/PoliWebex) e dai progetti della community raccolti da
-[PoliNetwork](https://polinetwork.org/it/projects/): crediti e licenze in [NOTICE.md](NOTICE.md) e nella
-pagina *Community* dell'app.
+> **App non ufficiale**, non affiliata né approvata dal Politecnico di Milano. Usa le registrazioni solo per
+> studio personale e nel rispetto del regolamento di Ateneo. Vedi [Privacy e uso responsabile](PRIVACY.md).
 
-## Provarla
+---
+
+## Cosa fa
+
+| | |
+|---|---|
+| **📥 Registrazioni** | Trova le lezioni ovunque siano nel corso WeBeep (archivi RecMan, link WebEx, annunci, mp4, YouTube) e le scarica in parallelo. Sincronizzazione automatica all'avvio, con coda di priorità tra i corsi. |
+| **👥 Lezioni parallele** | Se un corso ha le registrazioni di più docenti, ti chiede quale segui prima di scaricarle (anche più di uno). |
+| **🎙 Trascrizione locale** | Whisper large-v3-turbo o Parakeet, configurati in automatico per il tuo hardware (Apple Silicon, NVIDIA, solo CPU). Toglie ehm, mmm, ripetizioni e frasi inventate. L'audio non lascia il computer. |
+| **▶ Pagina della lezione** | Player interno (velocità fino a 3×, salto dei silenzi, ripresa automatica), trascrizione sincronizzata, cercabile e copiabile. |
+| **✨ Studia con l'AI** | Per ogni lezione: sommario, appunti, riassunto, spiegazioni, **flashcard interattive**, **domande d'esame**, chat sulla lezione. Usa Antigravity CLI, Claude Code o Gemini CLI. |
+| **🔎 Ricerca semantica** | Cerca per significato in lezioni, slide e appunti (anche tra lingue diverse) e chiedi al corso, con risposte citate. Tutto in locale. |
+| **✎ Appunti** | Markdown, LaTeX o Typst (motori inclusi), con anteprima, assistente AI che propone modifiche da accettare una a una, dettatura vocale. Collegabili a una o più lezioni. |
+| **📅 Studio** | Orario delle lezioni dai Servizi Online, calendario, **aule libere con mappa**, cose da fare, Pomodoro con statistiche. |
+| **☁ Sync e integrazioni** | Appunti e impostazioni su iCloud, Google Drive, Dropbox o OneDrive. Esporta in Notion, Note di Apple, Goodnotes, Notability, Obsidian. |
+| **🤖 Assistenti AI e script** | Server **MCP** e **riga di comando** per usare PoliRec da Claude o dal tuo flusso di lavoro. |
+
+## Installazione
+
+1. Scarica l'installer dalla pagina **[Releases](../../releases)**:
+   - **macOS**: `.dmg` (Apple Silicon o Intel);
+   - **Windows**: `.exe`;
+   - **Linux**: `.AppImage` o `.deb`.
+2. Serve **Google Chrome** installato: il login PoliMi/SPID avviene in una sua finestra, sui siti ufficiali.
+3. Al primo avvio il **setup** analizza il computer e installa il motore di trascrizione più adatto (qualche minuto).
+
+> **macOS**: l'app non è firmata con un certificato Apple. La prima volta aprila con *tasto destro → Apri*.
+> **Windows**: se compare SmartScreen scegli *Ulteriori informazioni → Esegui comunque*.
+
+Dettagli e requisiti nella wiki: **[Installazione e primo avvio](docs/wiki/Installazione-e-primo-avvio.md)**.
+
+## Come si usa, in breve
+
+1. **＋ Aggiungi corso**: incolla il link WeBeep (anche di una sezione), il codice o il nome, e scegli la cartella.
+2. **⟳ Sincronizza**: PoliRec trova le registrazioni e le scarica. La prima volta si apre Chrome per il login.
+3. Le lezioni vengono **trascritte** e **riassunte** in automatico. Apri una lezione per guardarla, leggere la trascrizione
+   e studiare con flashcard, domande e chat.
+4. Premi **⇧⌘P** (o **⌘K**) per la command palette: cerca ovunque, crea appunti, cambia tema, sincronizza.
+
+Guida completa: **[wiki](docs/wiki/Home.md)**.
+
+## PoliRec dal tuo assistente AI o dal terminale
+
+Attiva **Impostazioni → Assistenti AI e automazioni → Assistenti AI (MCP)**, poi:
 
 ```bash
-cd ~/Documents/dev/polirec
+# Claude Code: un clic su «Aggiungi a Claude Code», oppure
+claude mcp add polirec --scope user -e ELECTRON_RUN_AS_NODE=1 -- <eseguibile dell'app> <cartella dell'app>/src/mcp.js
+
+# riga di comando (l'alias esatto si copia dalle Impostazioni)
+polirec lessons ANN                         # lezioni del corso con sommario
+polirec transcript ANN 3 > lezione3.txt     # trascrizione senza tempi
+polirec search "vanishing gradient"         # ricerca semantica
+polirec ask "come funziona il dropout?" --course ANN
+polirec rooms --from 14:00 --hours 2        # aule libere
+```
+
+23 strumenti MCP e tutti i comandi: **[Server MCP](docs/wiki/Server-MCP.md)** · **[Riga di comando](docs/wiki/Riga-di-comando.md)**.
+
+## Documentazione
+
+| Pagina | Contenuto |
+|---|---|
+| [Installazione e primo avvio](docs/wiki/Installazione-e-primo-avvio.md) | Requisiti, setup della trascrizione, dove finiscono i file |
+| [Guida all'app](docs/wiki/Guida-all-app.md) | Corsi, lezioni, studio con l'AI, appunti, calendario, aule, impostazioni |
+| [Scorciatoie e command palette](docs/wiki/Scorciatoie-e-command-palette.md) | Tutte le scorciatoie da tastiera e i comandi della palette |
+| [Riga di comando](docs/wiki/Riga-di-comando.md) | Riferimento completo della CLI `polirec` |
+| [Server MCP](docs/wiki/Server-MCP.md) | Collegare Claude Code, Claude Desktop e altri assistenti; elenco degli strumenti |
+| [Sviluppo](docs/wiki/Sviluppo.md) | Avvio da sorgente, struttura del codice, test, build e rilascio |
+| [Risoluzione dei problemi](docs/wiki/Risoluzione-dei-problemi.md) | Login, download, trascrizione, AI, MCP |
+
+## Sviluppo
+
+```bash
+git clone <questa-repo> polirec && cd polirec
 npm install
-npm start
+npm start               # avvia l'app (compila prima l'editor)
+npm run cli -- help     # riga di comando
+npm run dist:mac        # installer (anche dist:win, dist:linux)
 ```
 
-Al primo avvio il **setup** analizza il computer e installa la trascrizione più adatta in un ambiente privato
-(`~/.polirec/venv`, che non tocca il Python di sistema):
+Requisiti: Node.js 22+, Google Chrome. Struttura del codice, test con dati isolati (`POLIREC_HOME`) e rilascio:
+**[Sviluppo](docs/wiki/Sviluppo.md)**.
 
-| Hardware | Motore | Modello consigliato |
-|---|---|---|
-| Mac Apple Silicon | mlx-whisper (GPU Metal), oppure Parakeet | large-v3-turbo (≥16 GB RAM) / small / base |
-| GPU NVIDIA | faster-whisper (CUDA) | large-v3-turbo |
-| Solo CPU | faster-whisper (int8) | small / base / tiny, in base a RAM e core |
+## Privacy
 
-Anche download in parallelo e modello vengono consigliati in Impostazioni in base all'hardware.
-ffmpeg è incluso nell'app. I motori LaTeX (Tectonic) e Typst si scaricano con un clic la prima volta che servono.
+Tutto resta sul tuo computer: PoliRec non ha server e non raccoglie statistiche. La password PoliMi non passa mai
+dall'app. Il testo arriva a un servizio esterno solo quando usi le funzioni AI, ed è inviato allo strumento che hai scelto.
+Dettagli in [PRIVACY.md](PRIVACY.md).
 
-## Funzioni
+## Crediti
 
-**Corsi e registrazioni**
-- Dashboard dei corsi in ordine di priorità; **sincronizzazione automatica all'avvio** (e, se vuoi, ogni N ore).
-- Le registrazioni vengono trovate ovunque siano: più archivi RecMan per corso, link WebEx diretti,
-  annunci del forum, mp4 caricati, YouTube.
-- Materiale del corso (slide, PDF, cartelle) organizzato per sezione, se lo vuoi.
-- **Pagina del corso in stile Notion**: pagina libera in Markdown, cose da fare, ultime lezioni, prossime lezioni
-  dall'orario, appunti, materiale, statistiche di studio.
-- **Pagina della lezione**:
-  - player interno: velocità fino a 3×, ±10 s, schermo intero, salto dei silenzi, ripresa da dove eri rimasto;
-  - trascrizione sincronizzata e cercabile;
-  - note AI e sommario.
-- **Riepilogo del corso** `INDICE.html`: ogni lezione con descrizione degli argomenti e link rapidi.
+PoliRec nasce da [PoliWebex](https://github.com/sup3rgiu/PoliWebex) (sup3rgiu, MIT) e dai progetti della community
+studentesca raccolti da [PoliNetwork](https://polinetwork.org/it/projects/): polimi-schedule-js, PoliAule, @alpolimibot,
+WeBeepSync, PoliMi Webex Enhancer e altri. Elenco completo, con licenze e uso, in [NOTICE.md](NOTICE.md) e nella pagina
+*Community* dell'app.
 
-**Trascrizione**
-- Whisper large-v3-turbo o Parakeet (il modello usato da Handy), tutto in locale.
-- **Pulizia automatica**: toglie ehm/mmm/uh, balbettii e frasi inventate da Whisper nei silenzi.
-  Gli originali restano in `trascrizioni/.orig`.
+## Licenza
 
-**Appunti**: tre editor, con il formato predefinito scelto in Impostazioni.
-- **Markdown**: anteprima live, formule `$…$`/`$$…$$` con KaTeX, checklist, immagini incollate, esportazione PDF.
-- **LaTeX** con motore Tectonic incluso, anteprima PDF ed errori indicati sulla riga.
-- **Typst** con motore incluso, anteprima PDF ed errori indicati sulla riga.
+PoliRec è software libero, distribuito con licenza **[GNU GPL v3.0 o successiva](LICENSE)** (`GPL-3.0-or-later`).
 
-In tutti e tre:
-- **pannello AI laterale** (migliora, continua, spiega, riassumi, formule, esercizi, domande libere);
-  le risposte si inseriscono o sostituiscono la selezione;
-- **dettatura** 🎙 trascritta in locale, in stile Handy.
+In breve:
+- puoi usarlo, studiarlo, modificarlo e ridistribuirlo liberamente;
+- chi distribuisce una versione modificata deve rilasciarla con la stessa licenza e con il codice sorgente,
+  così l'app resta gratuita e aperta per tutti gli studenti.
 
-**Studio**
-- **Calendario** con l'orario importato dai Servizi Online (via polimi-schedule-js), file e URL `.ics`,
-  scadenze delle cose da fare; esportazione `.ics` per Google o Apple Calendar.
-- **Aule libere** in tempo reale dalle API pubbliche del Politecnico, con la timeline delle occupazioni.
-- **Da fare** per corso e generale, con scadenze.
-- **Pomodoro** nella barra laterale, assegnabile a un corso, con statistiche.
+Il codice derivato da PoliWebex conserva la sua nota di copyright MIT (`legacy/LICENSE`). I componenti di terze parti
+mantengono le proprie licenze (vedi [NOTICE.md](NOTICE.md)).
 
-**AI** (Antigravity CLI predefinito, oppure Claude Code o Gemini CLI)
-- Sommario automatico dopo la trascrizione.
-- Appunti, riassunti, spiegazioni e flashcard per ogni lezione.
-- Agente sull'intero corso: riassunto, guida d'esame, glossario, mappa slide↔lezioni.
+## Supporta il progetto
 
-**Aspetto**: tema Normale (stile macOS) o Developer, chiaro/scuro, font JetBrains Mono incluso.
-
-## Distribuzione
-
-1. **Configura** in `package.json` → `polirec`:
-   ```json
-   "polirec": { "donateUrl": "https://buymeacoffee.com/<tuo-utente>", "repo": "<utente>/polirec" }
-   ```
-   - `donateUrl` mostra il pulsante ☕ nella barra laterale e in Impostazioni.
-   - `repo` attiva il controllo aggiornamenti dalle release di GitHub.
-
-   Per pubblicare su GitHub aggiungi anche `"repository"` e `build.publish` con owner e repo.
-2. **Pubblica una versione**: `npm version minor && git push --tags`. Il workflow
-   `.github/workflows/build.yml` crea `.dmg`/`.zip` (macOS arm64+x64), `.exe` (Windows) e
-   `.AppImage`/`.deb` (Linux) e li allega alla release.
-3. **Firma** (consigliata ma a pagamento):
-   - **macOS**: senza un certificato Apple Developer (99 $/anno) l'app va aperta la prima volta con
-     *tasto destro → Apri*. Con il certificato imposta `CSC_LINK`/`CSC_KEY_PASSWORD` e la notarizzazione nel workflow.
-   - **Windows**: senza firma compare l'avviso SmartScreen ("Ulteriori informazioni → Esegui comunque").
-
-In locale: `npm run dist:mac`, `npm run dist:win`, `npm run dist:linux`, ognuno da eseguire sul proprio sistema operativo.
-
-## Riga di comando
-
-```bash
-node src/cli.js courses | list | add <corso> <cartella> [nome] [--materials] [--lang en]
-node src/cli.js sync [corso…] [--dry-run] [--limit N] [--materials] [--only-materials] [-j N]
-node src/cli.js transcribe [corso]
-node scripts/discover-all.js out.json      # verifica in sola lettura su tutti i tuoi corsi
-```
-
-Dati e configurazione in `~/.polirec/`; in caso di problemi, screenshot e HTML delle pagine sono in `~/.polirec/debug/`.
-
-## Usare PoliRec da Claude o da altri assistenti (MCP) e dalla riga di comando
-
-Attiva **Impostazioni → Assistenti AI e automazioni → Assistenti AI (MCP)**. Poi:
-
-- **Claude Code**: premi «Aggiungi a Claude Code» (oppure copia il comando `claude mcp add polirec …`).
-- **Claude Desktop / altri client MCP**: «Copia JSON» e incollalo nella loro configurazione MCP.
-- **Script e terminale**: «Copia alias» e usa `polirec lessons <corso>`, `polirec transcript <corso> <lezione>`,
-  `polirec search "…"`, `polirec ask "…"`, `polirec notes`, `polirec new-note`, `polirec todo`, `polirec timetable`,
-  `polirec rooms`… (`--json` per l'output strutturato).
-
-Il server MCP (`src/mcp.js`) espone 23 strumenti: corsi e lezioni, trascrizioni (a pezzi), note AI (lettura e generazione),
-ricerca semantica e domande con citazioni, appunti (crea/modifica/collega a lezioni), attività, orario, aule libere,
-sincronizzazione e trascrizione. Usa il runtime dell'app (`ELECTRON_RUN_AS_NODE=1`), quindi non serve installare Node.js.
-CLI e MCP condividono `src/core/api.js` e leggono/scrivono gli stessi dati dell'app, in modo sicuro anche ad app aperta.
+PoliRec è e resterà gratuito. Se ti è utile, puoi offrire un caffè ☕ dal pulsante nell'app, segnalare problemi
+o contribuire con una pull request.
