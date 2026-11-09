@@ -1,0 +1,17 @@
+{
+  "name": "polirec",
+  "version": "0.1.0",
+  "description": "Download, transcribe and study PoliMi lecture recordings (WeBeep / RecMan / WebEx)",
+  "main": "src/main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "cli": "node src/cli.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^25.16.0"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
+  }
+}

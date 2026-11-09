@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="it">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+    <title>PoliRec</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <aside id="sidebar">
+            <div class="brand"><span class="dot"></span>PoliRec</div>
+            <div class="side-actions">
+                <button id="btn-add" class="primary">+ Aggiungi corso</button>
+                <button id="btn-sync-all">⟳ Sincronizza tutto</button>
+            </div>
+            <nav id="course-list"></nav>
+            <div class="side-footer">
+                <div id="tools"></div>
+                <button id="btn-settings" class="ghost">⚙ Impostazioni</button>
+            </div>
+        </aside>
+
+        <main id="main">
+            <div id="login-banner" class="banner hidden">🔐 Login richiesto: completa l'accesso PoliMi/SPID nella finestra di Chrome che si è aperta.</div>
+            <section id="empty" class="empty">
+                <h1>Le tue lezioni, scaricate e trascritte.</h1>
+                <p>Aggiungi un corso con il link WeBeep, il codice (es. <code>054307</code>) o scegliendolo dai tuoi corsi. PoliRec trova gli archivi delle registrazioni in tutte le sezioni, scarica le lezioni nuove, le trascrive con Whisper e può generare appunti con Claude Code, Antigravity o Gemini.</p>
+                <button class="primary" id="btn-add-first">+ Aggiungi il primo corso</button>
+            </section>
+            <section id="course" class="hidden">
+                <header class="course-head">
+                    <div>
+                        <h1 id="c-title"></h1>
+                        <div class="meta"><a href="#" id="c-dir"></a> · <span id="c-stats"></span></div>
+                        <div id="c-sources" class="chips"></div>
+                    </div>
+                    <div class="head-actions">
+                        <button id="c-sync" class="primary">⟳ Sincronizza</button>
+                        <button id="c-transcribe">🎙 Trascrivi mancanti</button>
+                        <div class="split">
+                            <button id="c-notes-all">✨ Note per tutte</button>
+                            <select id="c-notes-template"></select>
+                        </div>
+                        <button id="c-agent">🤖 Agente AI</button>
+                        <button id="c-more" class="ghost">⋯</button>
+                    </div>
+                </header>
+                <div class="table-wrap">
+                    <table id="rec-table">
+                        <thead><tr><th>Data</th><th>Argomento</th><th>Tipo</th><th>Durata</th><th>Video</th><th>Trascrizione</th><th>Note</th><th></th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                    <div id="no-recs" class="muted hidden">Nessuna registrazione ancora. Premi <b>Sincronizza</b>.</div>
+                </div>
+            </section>
+            <section id="logpanel">
+                <div class="log-head"><span>Attività</span><span id="activity"></span><button class="ghost small" id="log-toggle">▾</button></div>
+                <pre id="log"></pre>
+            </section>
+        </main>
+    </div>
+
+    <!-- Add course -->
+    <dialog id="dlg-add">
+        <form method="dialog" class="dlg">
+            <h2>Aggiungi corso</h2>
+            <label>Corso<input id="add-input" placeholder="Link WeBeep, codice (054307) o nome" required></label>
+            <div class="row"><button type="button" id="add-pick-webeep" class="ghost">📚 Scegli dai miei corsi WeBeep</button></div>
+            <div id="add-webeep-list" class="pick-list hidden"></div>
+            <label>Cartella di destinazione
+                <div class="row"><input id="add-dir" placeholder="/Volumes/..." required><button type="button" id="add-dir-pick">Sfoglia…</button></div>
+            </label>
+            <label>Nome (opzionale)<input id="add-name" placeholder="es. ANN&DL"></label>
+            <div class="dlg-actions"><button value="cancel" class="ghost">Annulla</button><button id="add-ok" value="ok" class="primary">Aggiungi</button></div>
+        </form>
+    </dialog>
+
+    <!-- Course settings -->
+    <dialog id="dlg-course">
+        <form method="dialog" class="dlg">
+            <h2>Impostazioni corso</h2>
+            <label>Nome<input id="cs-name"></label>
+            <label>Corso (link/codice/nome)<input id="cs-input"></label>
+            <label>Cartella<div class="row"><input id="cs-dir"><button type="button" id="cs-dir-pick">Sfoglia…</button></div></label>
+            <label>Link extra (uno per riga) — archivi RecMan, registrazioni WebEx, mp4 o YouTube non trovati automaticamente
+                <textarea id="cs-extra" rows="4"></textarea></label>
+            <label>Lingua delle lezioni (trascrizione)<select id="cs-lang"><option value="">Come impostazioni generali</option><option value="it">Italiano</option><option value="en">Inglese</option><option value="auto">Rilevamento automatico</option></select></label>
+            <label>Password video WebEx (se il docente le protegge)<input id="cs-pwd"></label>
+            <div class="dlg-actions"><button type="button" id="cs-remove" class="danger">Rimuovi corso</button><span class="grow"></span><button value="cancel" class="ghost">Annulla</button><button value="ok" class="primary">Salva</button></div>
+        </form>
+    </dialog>
+
+    <!-- Settings -->
+    <dialog id="dlg-settings">
+        <form method="dialog" class="dlg">
+            <h2>Impostazioni</h2>
+            <fieldset><legend>Download</legend>
+                <label>Download in parallelo<input id="s-parallel" type="number" min="1" max="8"></label>
+                <label>Cartella base predefinita<div class="row"><input id="s-root"><button type="button" id="s-root-pick">Sfoglia…</button></div></label>
+            </fieldset>
+            <fieldset><legend>Trascrizione (Whisper)</legend>
+                <label class="check"><input type="checkbox" id="s-t-auto"> Trascrivi automaticamente dopo il download</label>
+                <label>Modello<select id="s-t-model"><option>tiny</option><option>base</option><option>small</option><option>medium</option><option>large</option><option>turbo</option></select></label>
+                <label>Lingua<select id="s-t-lang"><option value="it">Italiano</option><option value="en">Inglese</option><option value="auto">Rilevamento automatico</option></select></label>
+                <label>Formati<input id="s-t-format" placeholder="txt,srt"></label>
+                <label>Python<input id="s-t-python" placeholder="python3"></label>
+            </fieldset>
+            <fieldset><legend>AI</legend>
+                <label>Strumento<select id="s-ai-provider"></select></label>
+                <label>Modello (opzionale)<input id="s-ai-model" placeholder="predefinito del CLI"></label>
+                <label class="check"><input type="checkbox" id="s-ai-auto"> Genera appunti automaticamente dopo la trascrizione</label>
+            </fieldset>
+            <div class="dlg-actions"><button value="cancel" class="ghost">Annulla</button><button value="ok" class="primary">Salva</button></div>
+        </form>
+    </dialog>
+
+    <!-- Viewer / AI output -->
+    <dialog id="dlg-view" class="wide">
+        <div class="dlg">
+            <div class="view-head"><h2 id="v-title"></h2><span class="grow"></span><button id="v-open" class="ghost">Apri nell'editor</button><button id="v-close">Chiudi</button></div>
+            <div id="v-body" class="viewer"></div>
+        </div>
+    </dialog>
+
+    <!-- Agent -->
+    <dialog id="dlg-agent" class="wide">
+        <form method="dialog" class="dlg">
+            <h2>🤖 Agente AI sul corso</h2>
+            <p class="muted">Lo strumento scelto lavora nella cartella del corso: legge trascrizioni, note e slide e salva i risultati in <code>note/</code>.</p>
+            <div class="presets" id="agent-presets"></div>
+            <textarea id="agent-prompt" rows="5" placeholder="Es. Crea un riassunto dell'intero corso organizzato per argomenti, in note/riassunto_corso.md"></textarea>
+            <div class="row"><label>Strumento <select id="agent-provider"></select></label><span class="grow"></span><button value="cancel" class="ghost">Chiudi</button><button id="agent-run" value="run" class="primary">Avvia</button></div>
+        </form>
+    </dialog>
+
+    <div id="menu" class="menu hidden"></div>
+    <div id="toast" class="toast hidden"></div>
+    <script src="app.js"></script>
+</body>
+</html>
