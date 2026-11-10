@@ -10,20 +10,20 @@
 | Altro | **Google Chrome** (serve per il login PoliMi/SPID) | — |
 
 Gli strumenti AI sono **facoltativi**: Antigravity CLI (`agy`), [Claude Code](https://claude.com/claude-code)
-o [Gemini CLI](https://github.com/google-gemini/gemini-cli). PoliRec usa quello scelto in Impostazioni → AI, oppure il primo che trova installato.
+o [Gemini CLI](https://github.com/google-gemini/gemini-cli). PoliDesk usa quello scelto in Impostazioni → AI, oppure il primo che trova installato.
 
 ## Installazione
 
 1. Scarica l'installer dalla pagina **Releases** della repository.
 2. Installa:
-   - **macOS**: apri il `.dmg` e trascina PoliRec in Applicazioni. Al primo avvio usa *tasto destro → Apri*, perché l'app non è firmata con un certificato Apple.
+   - **macOS**: apri il `.dmg` e trascina PoliDesk in Applicazioni. Al primo avvio usa *tasto destro → Apri*, perché l'app non è firmata con un certificato Apple.
    - **Windows**: esegui il `.exe`. Se compare SmartScreen: *Ulteriori informazioni → Esegui comunque*.
-   - **Linux**: rendi eseguibile l'`.AppImage` (`chmod +x PoliRec-*.AppImage`) oppure installa il `.deb`.
+   - **Linux**: rendi eseguibile l'`.AppImage` (`chmod +x PoliDesk-*.AppImage`) oppure installa il `.deb`.
 
 ## Primo avvio: il setup
 
 Il setup analizza il computer (sistema, CPU, GPU, RAM) e installa la trascrizione più adatta in un ambiente Python
-privato (`~/.polirec/venv`), senza toccare il Python di sistema. Se Python manca, scarica [uv](https://github.com/astral-sh/uv).
+privato (`~/.polidesk/venv`), senza toccare il Python di sistema. Se Python manca, scarica [uv](https://github.com/astral-sh/uv).
 
 | Hardware | Motore | Modello consigliato |
 |---|---|---|
@@ -48,7 +48,7 @@ Componenti scaricati solo quando servono:
    In alternativa scegli dall'elenco dei tuoi corsi WeBeep.
 2. Scegli la **cartella** di destinazione e se scaricare anche il **materiale** (slide, PDF).
 3. Premi **⟳ Sincronizza**. Alla prima sincronizzazione si apre Chrome per il login PoliMi/SPID; la sessione viene ricordata.
-4. Se il corso ha **lezioni parallele di più docenti**, PoliRec chiede quale segui prima di scaricare.
+4. Se il corso ha **lezioni parallele di più docenti**, PoliDesk chiede quale segui prima di scaricare.
 
 ## Dove finiscono i file
 
@@ -60,13 +60,13 @@ Per ogni corso, nella cartella che hai scelto:
 ├── trascrizioni/        .txt e .srt (gli originali prima della pulizia in .orig/)
 ├── note/                note AI: «<lezione> - sommario.md», «- appunti.md», «- flashcard.md», «- domande.md»…
 ├── materiale/           slide e PDF, divisi per sezione WeBeep
-├── appunti/             i tuoi appunti (.md, .tex, .typ) e .polirec-links.json (collegamenti alle lezioni)
-├── polirec-workspace.json   pagina del corso, cose da fare, statistiche Pomodoro
-├── polirec.json         elenco delle registrazioni trovate
+├── appunti/             i tuoi appunti (.md, .tex, .typ) e .polidesk-links.json (collegamenti alle lezioni)
+├── polidesk-workspace.json   pagina del corso, cose da fare, statistiche Pomodoro
+├── polidesk.json         elenco delle registrazioni trovate
 └── INDICE.html / INDICE.md  riepilogo con link rapidi e sommari
 ```
 
-Dati dell'app in `~/.polirec/`:
+Dati dell'app in `~/.polidesk/`:
 
 | Percorso | Contenuto |
 |---|---|
@@ -79,4 +79,4 @@ Dati dell'app in `~/.polirec/`:
 | `cache/` | Mappe e foto delle aule |
 | `debug/` | Screenshot e HTML delle pagine se qualcosa va storto |
 
-Con la **sincronizzazione cloud** attiva, appunti, pagine dei corsi e impostazioni vengono salvati in `<cartella cloud>/PoliRec/`.
+Con la **sincronizzazione cloud** attiva, appunti, pagine dei corsi e impostazioni vengono salvati in `<cartella cloud>/PoliDesk/`.

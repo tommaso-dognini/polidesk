@@ -1,4 +1,4 @@
-# PoliRec
+# PoliDesk
 
 **Le lezioni del Politecnico di Milano, sul tuo computer: scaricate, trascritte e pronte da studiare.**
 
@@ -22,12 +22,12 @@ calendario, aule libere e Pomodoro, tutto in un'unica app.
 | **👥 Lezioni parallele** | Se un corso ha le registrazioni di più docenti, ti chiede quale segui prima di scaricarle (anche più di uno). |
 | **🎙 Trascrizione locale** | Whisper large-v3-turbo o Parakeet, configurati in automatico per il tuo hardware (Apple Silicon, NVIDIA, solo CPU). Toglie ehm, mmm, ripetizioni e frasi inventate. L'audio non lascia il computer. |
 | **▶ Pagina della lezione** | Player interno (velocità fino a 3×, salto dei silenzi, ripresa automatica), trascrizione sincronizzata, cercabile e copiabile. |
-| **✨ Studia con l'AI** | Per ogni lezione: sommario, appunti, riassunto, spiegazioni, **flashcard interattive**, **domande d'esame**, chat sulla lezione. Usa Antigravity CLI, Claude Code o Gemini CLI. |
+| **✨ Studia con l'AI** | Per ogni lezione: sommario, appunti, riassunto, spiegazioni, **flashcard interattive**, **domande d'esame**, chat sulla lezione. Usa Antigravity CLI, Claude Code o GitHub Copilot CLI, con il modello che scegli; se finiscono i crediti cambia modello, strumento o aspetta il reset. |
 | **🔎 Ricerca semantica** | Cerca per significato in lezioni, slide e appunti (anche tra lingue diverse) e chiedi al corso, con risposte citate. Tutto in locale. |
 | **✎ Appunti** | Markdown, LaTeX o Typst (motori inclusi), con anteprima, assistente AI che propone modifiche da accettare una a una, dettatura vocale. Collegabili a una o più lezioni. |
 | **📅 Studio** | Orario delle lezioni dai Servizi Online, calendario, **aule libere con mappa**, cose da fare, Pomodoro con statistiche. |
 | **☁ Sync e integrazioni** | Appunti e impostazioni su iCloud, Google Drive, Dropbox o OneDrive. Esporta in Notion, Note di Apple, Goodnotes, Notability, Obsidian. |
-| **🤖 Assistenti AI e script** | Server **MCP** e **riga di comando** per usare PoliRec da Claude o dal tuo flusso di lavoro. |
+| **🤖 Assistenti AI e script** | Server **MCP** e **riga di comando** per usare PoliDesk da Claude o dal tuo flusso di lavoro. |
 
 ## Installazione
 
@@ -46,27 +46,27 @@ Dettagli e requisiti nella wiki: **[Installazione e primo avvio](docs/wiki/Insta
 ## Come si usa, in breve
 
 1. **＋ Aggiungi corso**: incolla il link WeBeep (anche di una sezione), il codice o il nome, e scegli la cartella.
-2. **⟳ Sincronizza**: PoliRec trova le registrazioni e le scarica. La prima volta si apre Chrome per il login.
+2. **⟳ Sincronizza**: PoliDesk trova le registrazioni e le scarica. La prima volta si apre Chrome per il login.
 3. Le lezioni vengono **trascritte** e **riassunte** in automatico. Apri una lezione per guardarla, leggere la trascrizione
    e studiare con flashcard, domande e chat.
 4. Premi **⇧⌘P** (o **⌘K**) per la command palette: cerca ovunque, crea appunti, cambia tema, sincronizza.
 
 Guida completa: **[wiki](docs/wiki/Home.md)**.
 
-## PoliRec dal tuo assistente AI o dal terminale
+## PoliDesk dal tuo assistente AI o dal terminale
 
 Attiva **Impostazioni → Assistenti AI e automazioni → Assistenti AI (MCP)**, poi:
 
 ```bash
 # Claude Code: un clic su «Aggiungi a Claude Code», oppure
-claude mcp add polirec --scope user -- <cartella dell'app>/bin/polirec mcp
+claude mcp add polidesk --scope user -- <cartella dell'app>/bin/polidesk mcp
 
 # riga di comando (l'alias esatto si copia dalle Impostazioni)
-polirec lessons ANN                         # lezioni del corso con sommario
-polirec transcript ANN 3 > lezione3.txt     # trascrizione senza tempi
-polirec search "vanishing gradient"         # ricerca semantica
-polirec ask "come funziona il dropout?" --course ANN
-polirec rooms --from 14:00 --hours 2        # aule libere
+polidesk lessons ANN                         # lezioni del corso con sommario
+polidesk transcript ANN 3 > lezione3.txt     # trascrizione senza tempi
+polidesk search "vanishing gradient"         # ricerca semantica
+polidesk ask "come funziona il dropout?" --course ANN
+polidesk rooms --from 14:00 --hours 2        # aule libere
 ```
 
 23 strumenti MCP e tutti i comandi: **[Server MCP](docs/wiki/Server-MCP.md)** · **[Riga di comando](docs/wiki/Riga-di-comando.md)**.
@@ -78,7 +78,7 @@ polirec rooms --from 14:00 --hours 2        # aule libere
 | [Installazione e primo avvio](docs/wiki/Installazione-e-primo-avvio.md) | Requisiti, setup della trascrizione, dove finiscono i file |
 | [Guida all'app](docs/wiki/Guida-all-app.md) | Corsi, lezioni, studio con l'AI, appunti, calendario, aule, impostazioni |
 | [Scorciatoie e command palette](docs/wiki/Scorciatoie-e-command-palette.md) | Tutte le scorciatoie da tastiera e i comandi della palette |
-| [Riga di comando](docs/wiki/Riga-di-comando.md) | Riferimento completo della CLI `polirec` |
+| [Riga di comando](docs/wiki/Riga-di-comando.md) | Riferimento completo della CLI `polidesk` |
 | [Server MCP](docs/wiki/Server-MCP.md) | Collegare Claude Code, Claude Desktop e altri assistenti; elenco degli strumenti |
 | [Sviluppo](docs/wiki/Sviluppo.md) | Avvio da sorgente, struttura del codice, test, build e rilascio |
 | [Risoluzione dei problemi](docs/wiki/Risoluzione-dei-problemi.md) | Login, download, trascrizione, AI, MCP |
@@ -86,32 +86,32 @@ polirec rooms --from 14:00 --hours 2        # aule libere
 ## Sviluppo
 
 ```bash
-git clone <questa-repo> polirec && cd polirec
+git clone <questa-repo> polidesk && cd polidesk
 npm install
 npm start               # avvia l'app (compila editor e backend Rust)
 npm run cli -- help     # riga di comando
 npm run dist:mac        # installer (anche dist:win, dist:linux)
 ```
 
-Requisiti: Node.js 22+, Rust (stable, via [rustup](https://rustup.rs)), Google Chrome. Struttura del codice, test con dati isolati (`POLIREC_HOME`) e rilascio:
+Requisiti: Node.js 22+, Rust (stable, via [rustup](https://rustup.rs)), Google Chrome. Struttura del codice, test con dati isolati (`POLIDESK_HOME`) e rilascio:
 **[Sviluppo](docs/wiki/Sviluppo.md)**.
 
 ## Privacy
 
-Tutto resta sul tuo computer: PoliRec non ha server e non raccoglie statistiche. La password PoliMi non passa mai
+Tutto resta sul tuo computer: PoliDesk non ha server e non raccoglie statistiche. La password PoliMi non passa mai
 dall'app. Il testo arriva a un servizio esterno solo quando usi le funzioni AI, ed è inviato allo strumento che hai scelto.
 Dettagli in [PRIVACY.md](PRIVACY.md).
 
 ## Crediti
 
-PoliRec nasce da [PoliWebex](https://github.com/sup3rgiu/PoliWebex) (sup3rgiu, MIT) e dai progetti della community
+PoliDesk nasce da [PoliWebex](https://github.com/sup3rgiu/PoliWebex) (sup3rgiu, MIT) e dai progetti della community
 studentesca raccolti da [PoliNetwork](https://polinetwork.org/it/projects/): polimi-schedule-js, PoliAule, @alpolimibot,
 WeBeepSync, PoliMi Webex Enhancer e altri. Elenco completo, con licenze e uso, in [NOTICE.md](NOTICE.md) e nella pagina
 *Community* dell'app.
 
 ## Licenza
 
-PoliRec è software libero, distribuito con licenza **[GNU GPL v3.0 o successiva](LICENSE)** (`GPL-3.0-or-later`).
+PoliDesk è software libero, distribuito con licenza **[GNU GPL v3.0 o successiva](LICENSE)** (`GPL-3.0-or-later`).
 
 In breve:
 - puoi usarlo, studiarlo, modificarlo e ridistribuirlo liberamente;
@@ -123,5 +123,5 @@ mantengono le proprie licenze (vedi [NOTICE.md](NOTICE.md)).
 
 ## Supporta il progetto
 
-PoliRec è e resterà gratuito. Se ti è utile, puoi offrire un caffè ☕ dal pulsante nell'app, segnalare problemi
+PoliDesk è e resterà gratuito. Se ti è utile, puoi offrire un caffè ☕ dal pulsante nell'app, segnalare problemi
 o contribuire con una pull request.

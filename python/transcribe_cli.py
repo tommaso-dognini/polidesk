@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Non-interactive wrapper around video_transcription.py, used by the PoliRec app.
+Non-interactive wrapper around video_transcription.py, used by the PoliDesk app.
 
   python3 transcribe_cli.py --model small --language it --formats txt,srt --out-dir DIR video1.mp4 [video2.mp4 ...]
 
@@ -56,7 +56,7 @@ def load_engine(engine, model, device="auto"):
 
     if engine == "parakeet":
         # NVIDIA Parakeet TDT v3 (CC-BY-4.0) via parakeet-mlx (Apache-2.0) — the engine used by Handy.
-        # Multilingual (25 EU languages, auto-detected); verbatim (fillers are removed by PoliRec's cleaner).
+        # Multilingual (25 EU languages, auto-detected); verbatim (fillers are removed by PoliDesk's cleaner).
         from parakeet_mlx import from_pretrained
         repo = model if "/" in model else "mlx-community/parakeet-tdt-0.6b-v3"
         m = from_pretrained(repo)
@@ -151,7 +151,7 @@ def main():
     if a.warmup:
         # run once on 1 s of silence so lazy engines (mlx) actually download the weights
         import wave, tempfile
-        tmp = os.path.join(tempfile.gettempdir(), "polirec_warmup.wav")
+        tmp = os.path.join(tempfile.gettempdir(), "polidesk_warmup.wav")
         with wave.open(tmp, "wb") as w:
             w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b"\x00\x00" * 16000)
         run(tmp, "en")

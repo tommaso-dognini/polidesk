@@ -108,7 +108,7 @@ window.tabOverview = async (c, el) => {
     const head = $('.block .block-h', $('#pg-view', el) && $('#pg-view', el).closest('.block'));
     const view = $('#pg-view', el);
     if (view) {
-        const isAuto = w.page.startsWith('<!-- polirec:auto');
+        const isAuto = w.page.startsWith('<!-- polidesk:auto');
         const clean = w.page.replace(/^<!--[\s\S]*?-->\s*/, '');
         view.innerHTML = clean.trim() ? PoliEditor.renderMarkdown(clean) : `<p class="faint">${c.recordings.some(r => r.transcript) ? 'La descrizione del corso viene generata dall\'AI dai sommari delle lezioni.' : 'La descrizione verrà generata automaticamente dall\'AI quando ci saranno lezioni trascritte.'}</p>`;
         if (head) {

@@ -1,29 +1,38 @@
 'use strict';
 // Electron main process: the window and what only a desktop UI can do (dialogs, theme, clipboard,
-// notifications, PDF rendering, the media:// video protocol). Everything else lives in polirecd, the
+// notifications, PDF rendering, the media:// video protocol). Everything else lives in polideskd, the
 // Rust backend (crates/): this file forwards the renderer's IPC calls to it and relays its events.
 const { app, BrowserWindow, ipcMain, dialog, shell, Notification, nativeTheme, protocol, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { pathToFileURL } = require('url');
-const { DaemonClient, APP_DIR } = require('./daemon-client');
+const { DaemonClient, APP_DIR, migrateLegacy } = require('./daemon-client');
 const pkg = require('../package.json');
+
+// renamed from PoliRec: keep the app's own browser data (login window session, page preferences)
+try {
+    const ud = app.getPath('userData');
+    if (!fs.existsSync(ud)) for (const n of ['PoliRec', 'polirec']) {
+        const o = path.join(app.getPath('appData'), n);
+        if (fs.existsSync(o)) { fs.renameSync(o, ud); break; }
+    }
+} catch (e) { }
 
 let win = null;
 const send = evt => { if (win && !win.isDestroyed()) win.webContents.send('evt', evt); };
-const notify = body => { if (Notification.isSupported()) new Notification({ title: 'PoliRec', body }).show(); };
+const notify = body => { if (Notification.isSupported()) new Notification({ title: 'PoliDesk', body }).show(); };
 
-// ---------- polirecd ----------
+// ---------- polideskd ----------
 const unpacked = p => p.replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep).replace(/app\.asar$/, 'app.asar.unpacked');
 const exe = n => n + (process.platform === 'win32' ? '.exe' : '');
 function daemonBin() {
-    if (process.env.POLIRECD) return process.env.POLIRECD;
-    if (app.isPackaged) return path.join(process.resourcesPath, 'bin', exe('polirecd'));
+    if (process.env.POLIDESKD) return process.env.POLIDESKD;
+    if (app.isPackaged) return path.join(process.resourcesPath, 'bin', exe('polideskd'));
     // development: the newest local build
     const root = path.join(__dirname, '..');
-    const c = ['release', 'debug'].map(p => path.join(root, 'target', p, exe('polirecd'))).filter(f => fs.existsSync(f));
-    if (!c.length) throw new Error('polirecd non compilato: esegui «npm run build:rust»');
+    const c = ['release', 'debug'].map(p => path.join(root, 'target', p, exe('polideskd'))).filter(f => fs.existsSync(f));
+    if (!c.length) throw new Error('polideskd non compilato: esegui «npm run build:rust»');
     return c.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
 }
 function ffmpegStatic() {
@@ -40,8 +49,8 @@ function writeRuntime() {
 
 const daemon = new DaemonClient({
     bin: (() => { try { return daemonBin(); } catch (e) { return ''; } })(),
-    env: { POLIREC_APP_ROOT: appRoot(), POLIREC_FFMPEG: ffmpegStatic() },
-    log: m => console.log('[polirecd]', m),
+    env: { POLIDESK_APP_ROOT: appRoot(), POLIDESK_FFMPEG: ffmpegStatic() },
+    log: m => console.log('[polideskd]', m),
     onEvent: e => {
         if (e.type === 'notify') return notify(e.body);
         if (e.type === 'login-required' && e.id) openLogin(e);
@@ -69,6 +78,7 @@ function openLogin({ id, url, email }) {
     const lw = new BrowserWindow({
         width: 540, height: 780, minWidth: 420, minHeight: 560, title: 'Accedi al Politecnico', parent: win && !win.isDestroyed() ? win : undefined,
         autoHideMenuBar: true, backgroundColor: '#ffffff', show: false,
+        // partition name from before the rename (keeps the login session)
         webPreferences: { partition: 'persist:polirec-login', contextIsolation: true, nodeIntegration: false, sandbox: true },
     });
     logins.set(id, lw);
@@ -143,7 +153,7 @@ async function mdToPdf(html, out) {
     const w = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
     const css = fs.readFileSync(path.join(__dirname, 'renderer', 'vendor', 'katex.min.css'), 'utf8').replace(/url\(fonts\//g, `url(${pathToFileURL(path.join(__dirname, 'renderer', 'vendor', 'fonts')).href}/`);
     const page = `<!doctype html><meta charset="utf-8"><style>${css} body{font:11pt/1.55 -apple-system,"Segoe UI",sans-serif;max-width:720px;margin:24px auto;color:#111} pre,code{font-family:Menlo,monospace;font-size:.9em} pre{background:#f4f4f4;padding:10px;border-radius:6px} img{max-width:100%} blockquote{border-left:3px solid #ddd;margin:0;padding-left:12px;color:#555}</style>${html}`;
-    const tmp = path.join(os.tmpdir(), `polirec-${Date.now()}.html`);
+    const tmp = path.join(os.tmpdir(), `polidesk-${Date.now()}.html`);
     fs.writeFileSync(tmp, page);
     await w.loadFile(tmp);
     const pdf = await w.webContents.printToPDF({ pageSize: 'A4', printBackground: true, margins: { marginType: 'default' } });
@@ -164,25 +174,25 @@ handle('notes:exportTo', async a => {
 });
 
 // about / donate / updates
-const meta = pkg.polirec || {};
+const meta = pkg.polidesk || {};
 handle('about', async () => {
     const d = await daemon.request('daemon:info').catch(() => ({}));
     return {
-        version: app.getVersion(), name: pkg.productName || 'PoliRec', donateUrl: meta.donateUrl || '', repo: meta.repo || '',
-        electron: process.versions.electron, platform: `${process.platform} ${process.arch}`, dataDir: APP_DIR, backend: d.version ? `polirecd ${d.version}` : '',
+        version: app.getVersion(), name: pkg.productName || 'PoliDesk', donateUrl: meta.donateUrl || '', repo: meta.repo || '',
+        electron: process.versions.electron, platform: `${process.platform} ${process.arch}`, dataDir: APP_DIR, backend: d.version ? `polideskd ${d.version}` : '',
     };
 });
 handle('about:notice', async () => { const p = path.join(__dirname, '..', 'NOTICE.md'); return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : ''; });
 handle('update:check', async () => {
     if (!meta.repo) return null;
-    const r = await fetch(`https://api.github.com/repos/${meta.repo}/releases/latest`, { headers: { 'User-Agent': 'PoliRec' } });
+    const r = await fetch(`https://api.github.com/repos/${meta.repo}/releases/latest`, { headers: { 'User-Agent': 'PoliDesk' } });
     if (!r.ok) return null;
     const j = await r.json();
     const latest = String(j.tag_name || '').replace(/^v/, '');
     return latest && latest.localeCompare(app.getVersion(), undefined, { numeric: true }) > 0 ? { version: latest, url: j.html_url } : null;
 });
 
-/** Every other channel of the preload goes to polirecd (same names). */
+/** Every other channel of the preload goes to polideskd (same names). */
 function forwardAll() {
     const channels = fs.readFileSync(path.join(__dirname, 'preload.js'), 'utf8').match(/invoke\('([^']+)'/g).map(s => s.slice(8, -1));
     for (const ch of new Set(channels)) if (!local.has(ch)) forward(ch);
@@ -199,25 +209,27 @@ async function createWindow() {
     nativeTheme.themeSource = appearance === 'light' ? 'light' : appearance === 'dark' ? 'dark' : 'system';
     win = new BrowserWindow({
         width: 1320, height: 860, minWidth: 960, minHeight: 620,
-        title: 'PoliRec',
+        title: 'PoliDesk',
         backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f5f5f7',
         titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
         trafficLightPosition: { x: 18, y: 20 },
         webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, plugins: true },
     });
-    // microphone for dictation; everything else denied
-    win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(perm === 'media' || perm === 'notifications'));
+    // microphone for dictation, video full screen; everything else denied
+    const allowed = new Set(['media', 'notifications', 'fullscreen']);
+    win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(allowed.has(perm)));
+    win.webContents.session.setPermissionCheckHandler((wc, perm) => allowed.has(perm));
     win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
     win.on('focus', () => daemon.request('cloud:autopull').catch(() => { }));
     win.webContents.on('console-message', e => { if (e.level === 'warning' || e.level === 'error') console.error('[renderer]', e.message); });
-    win.webContents.once('did-finish-load', () => { if (!process.env.POLIREC_SMOKE) daemon.request('app:ready').catch(() => { }); });
-    // POLIREC_SMOKE=out.png [POLIREC_SMOKE_JS=code]: render, screenshot, quit (automated UI checks)
-    if (process.env.POLIREC_SMOKE) {
+    win.webContents.once('did-finish-load', () => { if (!process.env.POLIDESK_SMOKE) daemon.request('app:ready').catch(() => { }); });
+    // POLIDESK_SMOKE=out.png [POLIDESK_SMOKE_JS=code]: render, screenshot, quit (automated UI checks)
+    if (process.env.POLIDESK_SMOKE) {
         win.webContents.setBackgroundThrottling(false);
         win.webContents.once('did-finish-load', () => setTimeout(async () => {
-            if (process.env.POLIREC_SMOKE_JS) { await win.webContents.executeJavaScript(process.env.POLIREC_SMOKE_JS).catch(e => console.error(e)); await new Promise(r => setTimeout(r, 1500)); }
-            fs.writeFileSync(process.env.POLIREC_SMOKE, (await win.webContents.capturePage()).toPNG());
+            if (process.env.POLIDESK_SMOKE_JS) { await win.webContents.executeJavaScript(process.env.POLIDESK_SMOKE_JS).catch(e => console.error(e)); await new Promise(r => setTimeout(r, 1500)); }
+            fs.writeFileSync(process.env.POLIDESK_SMOKE, (await win.webContents.capturePage()).toPNG());
             app.quit();
         }, 2000));
     }
@@ -225,6 +237,7 @@ async function createWindow() {
 
 // Local video with HTTP Range support (needed for seeking in <video>)
 function serveMedia(req) {
+    if (new URL(req.url).host === 'stream') return serveStream(req);
     const p = decodeURIComponent(new URL(req.url).pathname.replace(/^\//, ''));
     let st;
     try { st = fs.statSync(p); } catch (e) { return new Response('not found', { status: 404 }); }
@@ -243,12 +256,55 @@ function serveMedia(req) {
     return new Response(toWeb(0, st.size - 1), { status: 200, headers: { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(st.size) } });
 }
 
+// media://stream/<token>/… — lessons watched without downloading them. polideskd gives the real URL (WebEx,
+// signed, expires) and the headers; this proxies it: Range requests for mp4, playlists rewritten for HLS so
+// every segment comes back through here too (the page never sees tokens or cookies).
+const streamTargets = new Map();
+async function streamTarget(token) {
+    let t = streamTargets.get(token);
+    if (!t) { t = await daemon.request('rec:streamTarget', { token }); streamTargets.set(token, t); }
+    return t;
+}
+const b64u = s => Buffer.from(s).toString('base64url');
+async function serveStream(req) {
+    try {
+        const [, token, ...rest] = new URL(req.url).pathname.split('/');
+        const t = await streamTarget(token);
+        const url = rest[0] === 'u' ? Buffer.from(rest[1] || '', 'base64url').toString() : t.url;
+        const headers = { ...t.headers };
+        const range = req.headers.get('range');
+        if (range) headers.Range = range;
+        const r = await fetch(url, { headers, redirect: 'follow', signal: req.signal });
+        const type = r.headers.get('content-type') || '';
+        if (/mpegurl/i.test(type) || /\.m3u8($|\?)/i.test(new URL(r.url).pathname)) {
+            const base = r.url, prox = u => `media://stream/${token}/u/${b64u(new URL(u, base).href)}`;
+            const text = (await r.text()).split('\n').map(l => {
+                const s = l.trim();
+                if (!s) return l;
+                if (s.startsWith('#')) return l.replace(/URI="([^"]+)"/g, (_, u) => `URI="${prox(u)}"`);
+                return prox(s);
+            }).join('\n');
+            return new Response(text, { status: r.status, headers: { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' } });
+        }
+        const out = new Headers();
+        for (const k of ['content-type', 'content-length', 'content-range', 'accept-ranges']) if (r.headers.get(k)) out.set(k, r.headers.get(k));
+        if (!out.get('content-type') || /octet-stream|download/i.test(out.get('content-type'))) out.set('content-type', rest[0] === 'u' ? 'video/mp2t' : 'video/mp4');
+        return new Response(r.body, { status: r.status, headers: out });
+    } catch (e) {
+        if (e.name === 'AbortError') return new Response(null, { status: 499 });
+        return new Response(String(e.message || e), { status: 502 });
+    }
+}
+
 app.whenReady().then(async () => {
+    await migrateLegacy(m => console.log('[polideskd]', m));
+    // development: show the PoliDesk icon in the Dock (packaged builds get it from electron-builder)
+    if (!app.isPackaged && process.platform === 'darwin' && app.dock) try { app.dock.setIcon(path.join(__dirname, '..', 'build', 'icon.png')); } catch (e) { }
     writeRuntime();
     forwardAll();
     protocol.handle('media', req => serveMedia(req));
     try { await daemon.connect(); }
-    catch (e) { dialog.showErrorBox('PoliRec', `Impossibile avviare il motore di PoliRec (polirecd).\n\n${e.message}`); }
+    catch (e) { dialog.showErrorBox('PoliDesk', `Impossibile avviare il motore di PoliDesk (polideskd).\n\n${e.message}`); }
     await createWindow();
 });
 // the daemon keeps running: downloads, transcriptions and AI jobs continue with the window closed

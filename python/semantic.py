@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-PoliRec semantic search worker (long-running, JSON lines on stdin/stdout).
+PoliDesk semantic search worker (long-running, JSON lines on stdin/stdout).
 
 Embeddings: fastembed (Apache-2.0, ONNX runtime — no PyTorch) with the multilingual model
 sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 (Apache-2.0), so Italian queries
@@ -15,7 +15,7 @@ Commands:
 """
 import sys, os, json, hashlib, re
 
-MODEL = os.environ.get("POLIREC_EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+MODEL = os.environ.get("POLIDESK_EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 _model = None
 _cache = {}   # dir -> (meta list, matrix)
 

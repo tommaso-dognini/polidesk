@@ -1,4 +1,4 @@
-**PoliRec**
+**PoliDesk**
 
 - [Home](Home.md)
 - [Installazione e primo avvio](Installazione-e-primo-avvio.md)

@@ -2,23 +2,23 @@
 
 Copyright (C) 2026 Tommaso Dognini e contributori.
 
-PoliRec è software libero: puoi ridistribuirlo e/o modificarlo secondo i termini della **GNU General Public License**
+PoliDesk è software libero: puoi ridistribuirlo e/o modificarlo secondo i termini della **GNU General Public License**
 pubblicata dalla Free Software Foundation, versione 3 o (a tua scelta) qualsiasi versione successiva
 (`GPL-3.0-or-later`, testo completo in `LICENSE`). È distribuito nella speranza che sia utile, ma SENZA ALCUNA GARANZIA.
 
-PoliRec nasce dal lavoro della community studentesca del Politecnico di Milano, in particolare dai progetti raccolti da
+PoliDesk nasce dal lavoro della community studentesca del Politecnico di Milano, in particolare dai progetti raccolti da
 [PoliNetwork](https://polinetwork.org/it/projects/). Il codice di terze parti incluso mantiene la propria licenza e la propria
 nota di copyright, riportate qui sotto. Le licenze MIT, BSD, ISC e Apache-2.0 sono compatibili con la GPL-3.0.
 
-> PoliRec è un'app **non ufficiale**: non è affiliata, approvata o supportata dal Politecnico di Milano.
+> PoliDesk è un'app **non ufficiale**: non è affiliata, approvata o supportata dal Politecnico di Milano.
 > I marchi citati appartengono ai rispettivi proprietari.
 
 ## Codice della community incluso o derivato
 
-| Progetto | Autore | Licenza | Uso in PoliRec |
+| Progetto | Autore | Licenza | Uso in PoliDesk |
 |---|---|---|---|
 | [PoliWebex](https://github.com/sup3rgiu/PoliWebex) | sup3rgiu | MIT | Base del motore di download WebEx. Il codice originale modificato è in `legacy/`, con la sua licenza (`legacy/LICENSE`, Copyright (c) 2020 SUPERGIU). |
-| [polimi-schedule-js](https://github.com/bebora/polimi-schedule-js) | bebora | MIT | **Portato in Rust** in `crates/polirec-core/src/schedule.rs` (stessa logica, risultati identici sui test originali): conversione dell'orario dei Servizi Online in eventi/iCalendar. Licenza originale in `crates/polirec-core/licenses/polimi-schedule-js.LICENSE`. |
+| [polimi-schedule-js](https://github.com/bebora/polimi-schedule-js) | bebora | MIT | **Portato in Rust** in `crates/polidesk-core/src/schedule.rs` (stessa logica, risultati identici sui test originali): conversione dell'orario dei Servizi Online in eventi/iCalendar. Licenza originale in `crates/polidesk-core/licenses/polimi-schedule-js.LICENSE`. |
 | [PoliDown](https://github.com/sup3rgiu/PoliDown) | sup3rgiu | MIT | Riferimento per il supporto futuro ai video Microsoft Stream/SharePoint. |
 | [WebXDownloader](https://github.com/jacopo-j/WebXDownloader) | jacopo-j | MIT | Riferimento per le API di download WebEx. |
 
@@ -49,7 +49,7 @@ linkati nella pagina *Community*: senza licenza il loro codice non può essere r
 | [JetBrains Mono](https://www.jetbrains.com/lp/mono/) | SIL Open Font License 1.1 (`src/renderer/fonts/`) |
 | [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static) | GPL-3.0. È il binario FFmpeg, distribuito come programma separato e invocato come processo esterno. Licenza e note di build in `ffmpeg.LICENSE` / `ffmpeg.README` dentro `app.asar.unpacked/node_modules/ffmpeg-static/`. Sorgenti: https://ffmpeg.org/download.html |
 
-## Backend in Rust (polirecd, polirec)
+## Backend in Rust (polideskd, polidesk)
 
 Crate incluse nei binari, tutte con licenze compatibili con la GPL-3.0 (elenco completo con `cargo tree`):
 
@@ -78,5 +78,5 @@ Crate incluse nei binari, tutte con licenze compatibili con la GPL-3.0 (elenco c
 | [pypdf](https://github.com/py-pdf/pypdf) | BSD-3-Clause | Testo delle slide PDF per la ricerca |
 | [uv](https://github.com/astral-sh/uv) | MIT / Apache-2.0 | Solo se non c'è un Python adatto |
 
-Gli strumenti AI esterni (Antigravity CLI, Claude Code, Gemini CLI) non sono inclusi: PoliRec li richiama
+Gli strumenti AI esterni (Antigravity CLI, Claude Code, Gemini CLI) non sono inclusi: PoliDesk li richiama
 solo se l'utente li ha installati, e valgono i loro termini d'uso.

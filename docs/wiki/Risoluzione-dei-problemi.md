@@ -1,7 +1,7 @@
 # Risoluzione dei problemi
 
 Il pannello **Attività** (in basso a destra, oppure ⌘J) mostra cosa sta succedendo e il **Registro** di tutte le operazioni, con un filtro «Problemi».
-Se una pagina del Politecnico non si comporta come previsto, screenshot e HTML vengono salvati in `~/.polirec/debug/`.
+Se una pagina del Politecnico non si comporta come previsto, screenshot e HTML vengono salvati in `~/.polidesk/debug/`.
 
 ## Login e sincronizzazione
 
@@ -9,10 +9,10 @@ Se una pagina del Politecnico non si comporta come previsto, screenshot e HTML v
 |---|---|
 | Si apre «Accedi al Politecnico» | Normale alla prima sincronizzazione o quando la sessione scade: accedi con PoliMi/SPID, la finestra si chiude da sola |
 | Il login non va avanti | Attiva *Impostazioni → Sincronizzazione → Mostra il browser* e riprova: vedrai Chrome e potrai accedere lì |
-| «Collega il disco…» | La cartella del corso è su un disco esterno scollegato: collegalo e PoliRec risincronizza da solo. Per spostare il corso: *Impostazioni del corso → Cartella* |
+| «Collega il disco…» | La cartella del corso è su un disco esterno scollegato: collegalo e PoliDesk risincronizza da solo. Per spostare il corso: *Impostazioni del corso → Cartella* |
 | Un download o una trascrizione non parte | Controlla nel pannello Attività che non sia in pausa (⏸) |
-| «Google Chrome non trovato» | Installa Chrome, oppure avvia con `POLIREC_CHROME=/percorso/di/chrome` |
-| Il profilo di Chrome è «in uso» | Un'altra sincronizzazione (app o CLI) sta usando il profilo: PoliRec attende che finisca. Se rimane bloccato, chiudi le finestre di Chrome aperte da PoliRec |
+| «Google Chrome non trovato» | Installa Chrome, oppure avvia con `POLIDESK_CHROME=/percorso/di/chrome` |
+| Il profilo di Chrome è «in uso» | Un'altra sincronizzazione (app o CLI) sta usando il profilo: PoliDesk attende che finisca. Se rimane bloccato, chiudi le finestre di Chrome aperte da PoliDesk |
 | Nessuna registrazione trovata | Controlla che il corso abbia un archivio delle registrazioni (RecMan o link WebEx). Puoi aggiungere i link a mano in *Impostazioni del corso → Link extra* |
 | Video protetto da password | *Impostazioni del corso → Password video* |
 | Il corso scarica le lezioni di un altro docente | *Impostazioni del corso → Docenti seguiti* |
@@ -40,14 +40,14 @@ Se una pagina del Politecnico non si comporta come previsto, screenshot e HTML v
 | Problema | Soluzione |
 |---|---|
 | «Accesso degli assistenti AI disattivato» | Attiva *Impostazioni → Assistenti AI e automazioni → Assistenti AI (MCP)* |
-| Claude non vede gli strumenti | `claude mcp list` deve mostrare `polirec`. Se hai spostato l'app, registrala di nuovo con il comando aggiornato |
-| `polirec: command not found` | Copia l'alias dalle Impostazioni nel tuo `~/.zshrc` o `~/.bashrc` e apri un nuovo terminale |
-| «polirecd non risponde» | `polirec daemon stop`, poi riapri l'app (o rilancia il comando): il server riparte da solo |
-| «Corso non trovato» | `polirec list` mostra i nomi e i numeri validi |
+| Claude non vede gli strumenti | `claude mcp list` deve mostrare `polidesk`. Se hai spostato l'app, registrala di nuovo con il comando aggiornato |
+| `polidesk: command not found` | Copia l'alias dalle Impostazioni nel tuo `~/.zshrc` o `~/.bashrc` e apri un nuovo terminale |
+| «polideskd non risponde» | `polidesk daemon stop`, poi riapri l'app (o rilancia il comando): il server riparte da solo |
+| «Corso non trovato» | `polidesk list` mostra i nomi e i numeri validi |
 
 ## macOS
 
 | Problema | Soluzione |
 |---|---|
-| «PoliRec non può essere aperto» | La prima volta: *tasto destro sull'app → Apri* |
-| I file di un disco esterno non si vedono | Concedi a PoliRec l'accesso ai dischi in *Impostazioni di Sistema → Privacy e sicurezza → File e cartelle* |
+| «PoliDesk non può essere aperto» | La prima volta: *tasto destro sull'app → Apri* |
+| I file di un disco esterno non si vedono | Concedi a PoliDesk l'accesso ai dischi in *Impostazioni di Sistema → Privacy e sicurezza → File e cartelle* |

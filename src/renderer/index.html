@@ -2,8 +2,8 @@
 <html lang="it">
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: media:; media-src 'self' media: file: blob:; font-src 'self' data:; frame-src 'self' file:">
-    <title>PoliRec</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file: media:; media-src 'self' media: file: blob:; connect-src 'self' media:; font-src 'self' data:; frame-src 'self' file:">
+    <title>PoliDesk</title>
     <link rel="stylesheet" href="vendor/katex.min.css">
     <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
     <link rel="stylesheet" href="style.css">
@@ -12,20 +12,20 @@
     <div id="app">
         <aside id="sidebar">
             <div class="drag"></div>
-            <div class="brand"><span class="logo"></span><span>PoliRec</span><span class="grow"></span><button class="icon ghost small sb-btn" id="sb-hide" title="Nascondi barra laterale (⌘\)" aria-label="Nascondi barra laterale"><span data-icon="sidebar"></span></button></div>
+            <div class="brand"><img class="logo" src="logo.svg" alt=""><span>PoliDesk</span><span class="grow"></span><button class="icon ghost small sb-btn" id="sb-hide" title="Nascondi barra laterale (⌘\)" aria-label="Nascondi barra laterale"><span data-icon="sidebar"></span></button></div>
             <button id="sb-search" class="sb-search" aria-label="Apri la command palette"><span data-icon="search"></span><span class="grow">Cerca o esegui…</span><kbd class="mod">K</kbd></button>
             <nav class="nav">
-                <a data-route="dashboard" class="nav-item" data-keys="1"><span class="ico" data-icon="home"></span>Dashboard</a>
-                <a data-route="notes" class="nav-item" data-keys="2"><span class="ico" data-icon="note"></span>Appunti</a>
-                <a data-route="calendar" class="nav-item" data-keys="3"><span class="ico" data-icon="calendar"></span>Calendario</a>
-                <a data-route="rooms" class="nav-item" data-keys="4"><span class="ico" data-icon="pin"></span>Aule libere</a>
-                <a data-route="todos" class="nav-item" data-keys="5"><span class="ico" data-icon="check"></span>Da fare</a>
+                <a data-route="dashboard" class="nav-item" data-keys="alt+1"><span class="ico" data-icon="home"></span>Dashboard</a>
+                <a data-route="notes" class="nav-item" data-keys="alt+2"><span class="ico" data-icon="note"></span>Appunti</a>
+                <a data-route="calendar" class="nav-item" data-keys="alt+3"><span class="ico" data-icon="calendar"></span>Calendario</a>
+                <a data-route="rooms" class="nav-item" data-keys="alt+4"><span class="ico" data-icon="pin"></span>Aule libere</a>
+                <a data-route="todos" class="nav-item" data-keys="alt+5"><span class="ico" data-icon="check"></span>Da fare</a>
             </nav>
             <div class="nav-label">Corsi</div>
             <nav id="side-courses" class="nav courses"></nav>
-            <div id="pomo" class="pomo"></div>
             <nav class="nav">
-                <a data-route="community" class="nav-item"><span class="ico" data-icon="users"></span>Community</a>
+                <!-- Community: hidden for now (viewCommunity in app.js is kept, commented out of the routes)
+                <a data-route="community" class="nav-item"><span class="ico" data-icon="users"></span>Community</a> -->
                 <a data-route="settings" class="nav-item" data-keys=","><span class="ico" data-icon="settings"></span>Impostazioni</a>
             </nav>
             <div id="side-status" class="side-status hidden"></div>
@@ -33,7 +33,7 @@
         <div id="sb-hot" title=""></div>
         <main id="main">
             <button class="icon ghost small sb-btn" id="sb-show" title="Mostra barra laterale (⌘\)" aria-label="Mostra barra laterale"><span data-icon="sidebar"></span></button>
-            <div class="drag top"></div>
+            <header id="topbar" class="topbar"><span class="grow"></span><div id="focus-slot" class="tb-slot"></div></header>
             <div id="banner" class="banner hidden"></div>
             <div id="view"></div>
             <footer id="activity" class="activity">
@@ -57,6 +57,9 @@
     <script src="palette.js"></script>
     <script src="activity-ui.js"></script>
     <script src="vendor/leaflet/leaflet.js"></script>
+    <script src="vendor/hls.min.js"></script>
     <script src="rooms-ui.js"></script>
+    <script src="pn-ui.js"></script>
+    <script src="deps-ui.js"></script>
 </body>
 </html>

@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const invoke = (ch, arg) => ipcRenderer.invoke(ch, arg);
 
-contextBridge.exposeInMainWorld('polirec', {
+contextBridge.exposeInMainWorld('polidesk', {
     state: () => invoke('state'),
     addCourse: c => invoke('course:add', c),
     updateCourse: (id, patch) => invoke('course:update', { id, patch }),
@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('polirec', {
     notesBatch: (courseId, template, provider) => invoke('notes:batch', { courseId, template, provider }),
     agent: (courseId, prompt, provider) => invoke('agent', { courseId, prompt, provider }),
     recording: (courseId, key) => invoke('recording', { courseId, key }),
+    recStream: (courseId, key, refresh) => invoke('rec:stream', { courseId, key, refresh: !!refresh }),
+    downloadVideo: (courseId, keys) => invoke('rec:downloadVideo', { courseId, keys: [].concat(keys) }),
+    freeSpace: (courseId, dryRun) => invoke('course:freeSpace', { courseId, dryRun: !!dryRun }),
     askLesson: (courseId, key, question, history) => invoke('lesson:ask', { courseId, key, question, history }),
     copy: text => invoke('clipboard:write', text),
     assistant: { info: () => invoke('assistant:info'), addClaude: () => invoke('assistant:addClaude') },
@@ -96,7 +99,14 @@ contextBridge.exposeInMainWorld('polirec', {
         pauseTranscription: video => invoke('transcribe:pause', { video }), resumeTranscription: video => invoke('transcribe:resume', { video }),
         pauseTranscriptions: () => invoke('transcriptions:pauseAll'), resumeTranscriptions: () => invoke('transcriptions:resumeAll'),
     },
-    aiSwitch: { use: (provider, remember) => invoke('ai:use', { provider, remember }), wait: () => invoke('ai:wait'), resume: () => invoke('ai:resume') },
+    aiSwitch: { use: (provider, remember, model) => invoke('ai:use', { provider, remember, model }), wait: () => invoke('ai:wait'), resume: () => invoke('ai:resume') },
+    aiModels: provider => invoke('ai:models', { provider }),
+    aiRescan: () => invoke('ai:rescan'),
+    deps: { status: () => invoke('deps:status'), install: id => invoke('deps:install', { id }), terminal: cmd => invoke('deps:terminal', { cmd }) },
     drives: { status: () => invoke('drives:status'), wait: ids => invoke('drive:wait', ids) },
+    pn: {
+        index: force => invoke('pn:index', { force }), match: (courseId, q) => invoke('pn:match', { courseId, q }), tree: courseId => invoke('pn:tree', { courseId }),
+        download: (courseId, files) => invoke('pn:download', { courseId, files }), status: courseId => invoke('pn:status', { courseId }), cancel: courseId => invoke('pn:cancel', { courseId }),
+    },
     on: cb => ipcRenderer.on('evt', (_, e) => cb(e)),
 });

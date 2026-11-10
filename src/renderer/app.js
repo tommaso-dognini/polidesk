@@ -1,6 +1,6 @@
 'use strict';
-/* PoliRec renderer — tiny router + views rendered from state. */
-const api = window.polirec;
+/* PoliDesk renderer — tiny router + views rendered from state. */
+const api = window.polidesk;
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -63,7 +63,10 @@ const ICONS = {
     chevRight: '<path d="m9 18 6-6-6-6"/>',
     copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
     expand: '<path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/>',
+    shrink: '<path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/>',
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+    box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="m3 8 9 5 9-5M12 13v8"/>',
+    cloud: '<path d="M17.5 19H7a5 5 0 1 1 .9-9.9A6 6 0 0 1 19.4 11 4 4 0 0 1 17.5 19z"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
     command: '<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/>',
 };
@@ -72,7 +75,8 @@ $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
 
 const course = id => S.courses.find(c => c.id === id);
 const cname = c => c.name || (c.manifest.course && c.manifest.course.fullname) || c.input;
-const vpath = (c, r) => `${c.dir}/video/${r.file}`;
+// file the transcriber works on: the video, or the audio-only copy of a streamed lesson
+const vpath = (c, r) => !r.videoExists && r.audioExists ? `${c.dir}/audio/${String(r.file).replace(/\.mp4$/i, '')}.m4a` : `${c.dir}/video/${r.file}`;
 const fmtT = s => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
 const fmtDate = iso => iso ? new Date(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : '';
 
@@ -125,11 +129,11 @@ function render() {
     if (!S.settings.setupDone && route.name !== 'setup' && !render.skippedSetup) route = { name: 'setup' };
     renderSidebar();
     const v = $('#view');
-    const views = { dashboard: viewDashboard, course: viewCourse, recording: viewRecording, settings: viewSettings, setup: viewSetup, community: viewCommunity, ...(window.extraViews || {}) };
+    const views = { dashboard: viewDashboard, course: viewCourse, recording: viewRecording, settings: viewSettings, setup: viewSetup, /* community: viewCommunity, — hidden for now */ ...(window.extraViews || {}) };
     // the recording page owns a <video>: never re-render it on state refresh, only update panels
     if (route.name === 'recording' && v.dataset.view === 'recording:' + route.key) { updateRecordingLive(); return; }
     // don't wipe forms the user is typing in
-    if ((route.name === 'settings' || route.name === 'setup' || ['impostazioni', 'panoramica'].includes(route.tab) || (window.noRerender && window.noRerender.has(route.name)) || ['calendar', 'rooms', 'todos', 'search'].includes(route.name)) && v.dataset.view === viewKey()) return;
+    if ((route.name === 'settings' || route.name === 'setup' || ['impostazioni', 'panoramica', 'polinetwork'].includes(route.tab) || (window.noRerender && window.noRerender.has(route.name)) || ['calendar', 'rooms', 'todos', 'search'].includes(route.name)) && v.dataset.view === viewKey()) return;
     v.dataset.view = viewKey();
     (views[route.name] || viewDashboard)(v);
 }
@@ -151,8 +155,8 @@ function renderSidebar() {
     $('#side-courses').innerHTML = S.courses.map((c, i) => {
         const recs = c.recordings, dl = recs.filter(r => r.videoExists).length;
         const ico = running.has(c.id) ? '<span class="spin"></span>' : c.drive && c.drive.missing ? icon('alert', 'warn') : c.lastError ? icon('alert', 'err') : icon('book');
-        return `<a class="nav-item ${route.courseId === c.id ? 'active' : ''}" data-course="${c.id}" title="${esc(cname(c))}${i < 9 ? ` · g ${i + 1}` : ''}">
-            <span class="ico">${ico}</span><span class="n">${esc(cname(c))}</span><span class="badge">${dl}/${recs.length}</span></a>`;
+        return `<a class="nav-item ${route.courseId === c.id ? 'active' : ''}" data-course="${c.id}" title="${esc(cname(c))}${i < 9 ? ` · ${navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl+"}${i + 1}` : ''}">
+            <span class="ico">${ico}</span><span class="n">${esc(cname(c))}</span><span class="badge">${dl}/${recs.length}</span>${i < 9 ? `<span class="nk"><kbd>${navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl"}</kbd><kbd>${i + 1}</kbd></span>` : ''}</a>`;
     }).join('') || '<div class="faint" style="padding:6px 10px">Nessun corso</div>';
     $$('#side-courses [data-course]').forEach(a => a.onclick = () => go({ name: 'course', courseId: a.dataset.course, tab: 'panoramica' }));
     const tr = Object.values(tprog).filter(x => x === 'queued' || typeof x === 'number').length;
@@ -219,14 +223,15 @@ function viewCourse(v) {
     const full = c.manifest.course && c.manifest.course.fullname;
     const sub = [full && full.toLowerCase() !== cname(c).toLowerCase() ? full : '', `${recs.length} lezioni`, recs.length ? `${nTr} trascritte` : '',
         c.lastSync ? 'sync ' + new Date(c.lastSync).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : 'mai sincronizzato'].filter(Boolean);
-    const tabs = [['panoramica', 'Panoramica'], ['lezioni', 'Lezioni', recs.length], ['materiale', 'Materiale', c.materials ? (c.materialFiles || []).length : '']];
+    const tabs = [['panoramica', 'Panoramica'], ['lezioni', 'Lezioni', recs.length], ['materiale', 'Materiale', c.materials || (c.materialFiles || []).length ? (c.materialFiles || []).length : '']];
+    if ((Array.isArray(c.polinetwork) && c.polinetwork.length) || tab === 'polinetwork') tabs.push(['polinetwork', 'Appunti PoliNetwork']);
     if (tab === 'note') tabs.push(['note', 'Note AI']);
     if (tab === 'impostazioni') tabs.push(['impostazioni', 'Impostazioni']);
     v.innerHTML = `<div class="page course-page">
         <div class="page-head"><div><h1>${esc(cname(c))}</h1><div class="sub">${sub.map(esc).join(' · ')}</div></div>
             <button id="c-sync" class="${isRun ? '' : 'primary'}" title="Sincronizza questo corso">${isRun ? '<span class="spin"></span> Ferma' : icon('refresh') + ' Sincronizza'}</button>
             <button id="c-more" class="ghost icon" title="Altre azioni" aria-label="Altre azioni">${icon('more')}</button></div>
-        ${c.drive && c.drive.missing ? `<div class="note-line warn">${icon('alert')} <span class="grow">Registrazioni, trascrizioni e appunti di questo corso sono sul disco «${esc(c.drive.name)}», che non è collegato. Collegalo: PoliRec lo rileva e risincronizza da solo.</span><button class="small primary" id="c-drive">Collega il disco…</button></div>` : ''}
+        ${c.drive && c.drive.missing ? `<div class="note-line warn">${icon('alert')} <span class="grow">Registrazioni, trascrizioni e appunti di questo corso sono sul disco «${esc(c.drive.name)}», che non è collegato. Collegalo: PoliDesk lo rileva e risincronizza da solo.</span><button class="small primary" id="c-drive">Collega il disco…</button></div>` : ''}
         ${c.lastError && !isRun && !(c.drive && c.drive.missing) ? `<div class="note-line err">${icon('alert')} <span class="grow">${esc(String(c.lastError).slice(0, 220))}</span><button class="small ghost" id="c-retry">Riprova</button></div>` : ''}
         <div class="tabs" role="tablist">${tabs.map(([k, l, n]) => `<button role="tab" data-tab="${k}" class="${tab === k ? 'active' : ''}">${l}${n ? ` <span class="tab-n">${n}</span>` : ''}</button>`).join('')}</div>
         ${needsTeacherChoice(c) ? `<div class="note-line">${icon('users')} <span class="grow">Lezioni parallele di più docenti (${courseTeachers(c).map(t => esc(t.name)).join(', ')}): scegli quale segui prima di scaricarle.</span><button class="small primary" id="c-tch">Scegli docente…</button></div>` : ''}
@@ -237,7 +242,7 @@ function viewCourse(v) {
     $$('[data-tab]', v).forEach(b => b.onclick = () => go({ ...route, tab: b.dataset.tab }));
     $('#c-sync', v).onclick = () => guard(() => isRun ? api.stopSync() : api.sync([c.id]));
     $('#c-more', v).onclick = e => { const r = e.currentTarget.getBoundingClientRect(); showMenu(r.right - 250, r.bottom + 6, courseMenu(c)); };
-    ({ panoramica: window.tabOverview, lezioni: tabLessons, materiale: tabMaterials, note: tabNotes, impostazioni: tabCourseSettings })[tab](c, $('#tab', v));
+    ({ panoramica: window.tabOverview, lezioni: tabLessons, materiale: tabMaterials, note: tabNotes, impostazioni: tabCourseSettings, polinetwork: window.tabPoliNetwork })[tab](c, $('#tab', v));
 }
 function courseMenu(c) {
     return [
@@ -247,6 +252,7 @@ function courseMenu(c) {
         ...(courseTeachers(c).length > 1 ? [['Scegli docente…', () => askTeachers(c)]] : []),
         '-',
         ['Note AI di tutte le lezioni', () => go({ name: 'course', courseId: c.id, tab: 'note' })],
+        ['Appunti PoliNetwork', () => go({ name: 'course', courseId: c.id, tab: 'polinetwork' })],
         ['Impostazioni del corso', () => go({ name: 'course', courseId: c.id, tab: 'impostazioni' })],
     ];
 }
@@ -381,7 +387,11 @@ function lessonCard(c, r, num, linked) {
     const d = r.isoDate ? new Date(r.isoDate) : null;
     const p = progress[r.key], tp = tprog[vpath(c, r)];
     let state = '';
-    if (!r.videoExists) state = r.status === 'paused' ? `<span class="pill">${icon('pause')} download in pausa</span><button class="small ghost" data-act="dlres">${icon('play')} Riprendi</button>`
+    const streamed = c.streamOnly && !r.videoExists;   // watched online, only the audio is local
+    if (streamed && p && r.status !== 'error') state = `<span class="pill acc">${icon('download')} audio ${Math.round(p.percent || 0)}%</span>`;
+    else if (streamed && r.status === 'error' && !r.audioExists && !r.transcript) state = `<span class="pill err" title="${esc(r.error)}">audio non scaricato</span><button class="small ghost" data-act="dl">Riprova</button>`;
+    else if (streamed && (r.transcript || !r.audioExists)) { const at = resumeAt(r); state = `${at ? `<span class="pill acc" title="Riprendi da dove eri rimasto">${icon('play')} ${fmtT(at)}</span>` : ''}<span class="pill" title="Il video non è sul computer: lo guardi online">${icon('cloud')} streaming</span>`; }
+    else if (!r.videoExists && !streamed) state = r.status === 'paused' ? `<span class="pill">${icon('pause')} download in pausa</span><button class="small ghost" data-act="dlres">${icon('play')} Riprendi</button>`
         : p && r.status !== 'error' ? `<span class="pill acc">${icon('download')} ${Math.round(p.percent || 0)}%</span><button class="small ghost icon-only" data-act="dlpause" title="Metti in pausa">${icon('pause')}</button>` : r.status === 'error' ? `<span class="pill err" title="${esc(r.error)}">download non riuscito</span><button class="small ghost" data-act="dl">Riprova</button>` : `<button class="small ghost" data-act="dl" title="Scarica le lezioni mancanti del corso">${icon('download')} Scarica</button>`;
     else if (!r.transcript) state = tp === 'paused' ? `<span class="pill">${icon('pause')} trascrizione in pausa</span><button class="small ghost" data-act="trres">${icon('play')} Riprendi</button>` : tp === 'queued' ? '<span class="pill">trascrizione in coda</span>' : typeof tp === 'number' ? `<span class="pill acc">trascrivo ${tp}%</span>` : tp && tp.error ? '<span class="pill err">trascrizione non riuscita</span><button class="small ghost" data-act="tr">Riprova</button>' : `<button class="small ghost" data-act="tr">${icon('mic')} Trascrivi</button>`;
     else { const at = resumeAt(r); if (at) state = `<span class="pill acc" title="Riprendi da dove eri rimasto">${icon('play')} ${fmtT(at)}</span>`; }
@@ -393,7 +403,7 @@ function lessonCard(c, r, num, linked) {
         ? `${r.summary ? `<p class="sum">${esc(r.summary)}</p>` : ''}${bullets.length ? `<ul>${bullets.slice(0, 4).map(b => `<li>${esc(b)}</li>`).join('')}${bullets.length > 4 ? `<li class="faint more">e altri ${bullets.length - 4} argomenti</li>` : ''}</ul>` : ''}`
         : (r.transcript ? '<p class="sum faint">Sommario non ancora generato.</p>' : '');
     const meta = [d ? d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined }) : '—', r.teacher, r.type, r.duration].filter(Boolean).map(esc).join(' · ');
-    return `<article class="lcard ${r.videoExists ? '' : 'missing'}" tabindex="0" data-key="${esc(r.key)}">
+    return `<article class="lcard ${r.videoExists || c.streamOnly ? '' : 'missing'}" tabindex="0" data-key="${esc(r.key)}">
         <div class="lc-meta"><span class="lc-n">${num}</span><span class="lc-m">${meta}</span><span class="grow"></span>${state}</div>
         <h3>${esc(r.displayTitle || r.file)}</h3>
         ${sum}
@@ -401,7 +411,7 @@ function lessonCard(c, r, num, linked) {
 }
 
 function tabMaterials(c, el) {
-    if (!c.materials) {
+    if (!c.materials && !(c.materialFiles || []).length) {
         el.innerHTML = `<div class="empty-state"><h2>Materiale del corso</h2><p>Slide, PDF e cartelle pubblicate su WeBeep, organizzate per sezione.<br>Il download del materiale è disattivato per questo corso.</p>
             <button class="primary" id="m-on">Attiva e sincronizza</button></div>`;
         $('#m-on', el).onclick = () => guard(async () => { await api.updateCourse(c.id, { materials: true }); await api.sync([c.id]); refresh(); });
@@ -409,9 +419,10 @@ function tabMaterials(c, el) {
     }
     const tree = c.materialFiles || [];
     el.innerHTML = `<div class="toolbar"><span class="muted">${tree.length} file in <code>materiale/</code></span><span class="grow"></span>
-        <button id="m-open" class="ghost">Apri cartella</button><button id="m-sync">${icon('refresh')} Aggiorna</button></div><div class="list files" id="m-tree"></div>`;
+        <button id="m-pn" class="ghost">Appunti PoliNetwork…</button><button id="m-open" class="ghost">Apri cartella</button>${c.materials ? `<button id="m-sync">${icon('refresh')} Aggiorna</button>` : ''}</div><div class="list files" id="m-tree"></div>`;
+    $('#m-pn', el).onclick = () => go({ name: 'course', courseId: c.id, tab: 'polinetwork' });
     $('#m-open', el).onclick = () => guard(() => api.open(c.id, 'materials'));
-    $('#m-sync', el).onclick = () => guard(() => api.sync([c.id]));
+    if ($('#m-sync', el)) $('#m-sync', el).onclick = () => guard(() => api.sync([c.id]));
     if (!tree.length) { $('#m-tree', el).innerHTML = '<div class="empty-state">Nessun file ancora: premi Aggiorna.</div>'; return; }
     const groups = {};
     for (const f of tree) { const s = f.includes('/') ? f.split('/')[0] : 'Generale'; (groups[s] = groups[s] || []).push(f); }
@@ -446,6 +457,8 @@ function tabCourseSettings(c, el) {
     <div class="group"><h3>Sincronizzazione</h3>
         ${field('Sync automatica', 'Includi il corso nella sync all\'avvio e periodica', sw('cs-auto', c.autoSync !== false))}
         ${field('Scarica il materiale', 'Slide, PDF e cartelle del corso in materiale/', sw('cs-mat', !!c.materials))}
+        ${field('Guarda le lezioni in streaming', 'Non scarica i video: li guardi online dalla pagina della lezione. Scarica solo l\'audio, per trascrizione e appunti AI. Da ogni lezione puoi comunque scaricare il video intero.', sw('cs-stream', !!c.streamOnly))}
+        <div id="cs-free"></div>
         ${field('Link extra', 'Uno per riga: archivi RecMan, link WebEx, mp4 o YouTube non trovati automaticamente', `<textarea id="cs-extra" rows="3">${esc((c.extraUrls || []).join('\n'))}</textarea>`)}
         ${field('Password video', 'Se il docente protegge le registrazioni WebEx', `<input id="cs-pwd" value="${esc(c.videoPassword || '')}">`)}
         ${courseTeachers(c).length > 1 ? field('Docenti seguiti', 'Il corso ha lezioni parallele di più docenti: si scaricano solo quelle dei docenti scelti', `<span class="pill ${Array.isArray(c.teachers) ? 'ok' : 'warn'}">${Array.isArray(c.teachers) ? esc(c.teachers.join(', ')) : 'da scegliere'}</span><span class="grow"></span><button id="cs-tch">Cambia…</button>`) : ''}
@@ -455,17 +468,41 @@ function tabCourseSettings(c, el) {
     </div>
     <div class="row"><button class="danger" id="cs-del">Rimuovi corso</button><span class="faint">I file scaricati non vengono cancellati.</span><span class="grow"></span><button class="primary" id="cs-save">Salva</button></div>`;
     if ($('#cs-tch', el)) $('#cs-tch', el).onclick = () => askTeachers(c);
+    drawFreeSpace(c, el);
+    $('#cs-stream', el).onchange = () => guard(async () => {
+        await api.updateCourse(c.id, { streamOnly: $('#cs-stream', el).checked }); c.streamOnly = $('#cs-stream', el).checked;
+        toast(c.streamOnly ? 'Le nuove lezioni si guardano in streaming' : 'Le lezioni verranno scaricate alla prossima sincronizzazione');
+        drawFreeSpace(c, el);
+    });
     $('#cs-pick', el).onclick = async () => { const d = await api.pickDir($('#cs-dir', el).value); if (d) $('#cs-dir', el).value = d; };
     $('#cs-save', el).onclick = () => guard(async () => {
         const patch = {
             name: $('#cs-name', el).value, input: $('#cs-input', el).value, dir: $('#cs-dir', el).value, language: $('#cs-lang', el).value,
-            autoSync: $('#cs-auto', el).checked, materials: $('#cs-mat', el).checked, videoPassword: $('#cs-pwd', el).value,
+            autoSync: $('#cs-auto', el).checked, materials: $('#cs-mat', el).checked, videoPassword: $('#cs-pwd', el).value, streamOnly: $('#cs-stream', el).checked,
             extraUrls: $('#cs-extra', el).value.split('\n').map(s => s.trim()).filter(Boolean),
         };
         if (patch.input !== c.input) patch.webeepId = null;
         await api.updateCourse(c.id, patch); toast('Impostazioni salvate'); $('#view').dataset.view = ''; refresh();
     });
     $('#cs-del', el).onclick = () => { if (confirm(`Rimuovere "${cname(c)}" dall'app? I file restano sul disco.`)) guard(async () => { await api.removeCourse(c.id); go({ name: 'dashboard' }); refresh(); }); };
+}
+
+/** "Libera spazio": only for streamed courses, never automatic — videos go to the Trash, transcripts and notes stay. */
+async function drawFreeSpace(c, el) {
+    const box = $('#cs-free', el); if (!box) return;
+    if (!c.streamOnly) { box.innerHTML = ''; return; }
+    const info = await api.freeSpace(c.id, true).catch(() => null);
+    if (!info || !info.files) { box.innerHTML = field('Video già scaricati', '', '<span class="faint">Nessuno: il corso occupa solo lo spazio di audio, trascrizioni e appunti</span>'); return; }
+    const gb = b => b >= 1e9 ? (b / 1e9).toFixed(1) + ' GB' : Math.round(b / 1e6) + ' MB';
+    box.innerHTML = field('Video già scaricati', `${info.files} video, ${gb(info.bytes)}. Restano sul computer finché non li togli tu.`, `<button id="cs-freeb">Libera spazio…</button>`);
+    $('#cs-freeb', el).onclick = () => {
+        const m = modal(`<h2>Liberare ${gb(info.bytes)}?</h2>
+            <p class="muted" style="margin:0">${info.files === 1 ? 'Il video scaricato' : `I ${info.files} video scaricati`} di ${esc(cname(c))} ${info.files === 1 ? 'va' : 'vanno'} nel Cestino: puoi recuperarl${info.files === 1 ? 'o' : 'i'} finché non lo svuoti. Trascrizioni, appunti AI e audio restano; le lezioni si guarderanno in streaming.</p>
+            ${info.untranscribed ? `<p style="margin:0">⚠️ ${info.untranscribed === 1 ? (info.files === 1 ? 'Questa lezione non è' : 'Una di queste lezioni non è') : `${info.untranscribed} di queste lezioni non sono`} ancora trascritt${info.untranscribed === 1 ? 'a' : 'e'}: la trascrizione aspetterà l'audio, che si riscarica alla prossima sincronizzazione.</p>` : ''}
+            <div class="foot"><button class="ghost" id="fs-no">Annulla</button><button class="danger" id="fs-ok">Sposta nel Cestino</button></div>`);
+        $('#fs-no', m.el).onclick = m.close;
+        $('#fs-ok', m.el).onclick = () => guard(async () => { const r = await api.freeSpace(c.id); m.close(); toast(`${r.trashed} video nel Cestino · ${gb(r.bytes)} liberati`); drawFreeSpace(c, el); refresh(); });
+    };
 }
 
 // ───────── recording page ─────────
@@ -554,29 +591,48 @@ function updateRecordingLive() {
     });
 }
 
-function drawPlayer(c, r) {
+let hlsPlayer = null;
+function drawPlayer(c, r, stream) {
     const box = $('#player');
-    if (!recData.videoUrl) {
+    if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
+    if (!recData.videoUrl && !stream) {
         if (c.drive && c.drive.missing) {
             box.innerHTML = `<div class="empty"><div style="text-align:center">💽 Il video è sul disco «${esc(c.drive.name)}», che non è collegato<br><br><button class="primary" id="p-drive">Collega il disco…</button></div></div>`;
             $('#p-drive').onclick = () => ActivityUI.driveFor(c);
             player = null; return;
         }
-        box.innerHTML = `<div class="empty"><div style="text-align:center">${r.status === 'paused' ? 'Download in pausa' : r.status === 'error' ? 'Download non riuscito' : 'Video non ancora scaricato'}<br><br><button class="primary" id="p-sync">${icon(r.status === 'paused' ? 'play' : 'download')} ${r.status === 'paused' ? 'Riprendi' : 'Scarica'}</button></div></div>`;
-        $('#p-sync').onclick = () => guard(() => r.status === 'paused' ? api.activity.resumeDownload(c.id, r.key) : api.sync([c.id]));
+        // "Guarda in streaming" course: straight to the online video
+        if (recData.streamOnly && r.status !== 'downloading') return startStream(c, r);
+        const dl = r.status === 'downloading' ? 'Download in corso…' : r.status === 'paused' ? 'Download in pausa' : r.status === 'error' ? 'Download non riuscito' : 'Video non ancora scaricato';
+        box.innerHTML = `<div class="empty"><div style="text-align:center">${dl}<br><br>
+            <div class="row" style="justify-content:center;gap:8px"><button class="primary" id="p-stream">${icon('play')} Guarda in streaming</button>
+            ${r.status === 'downloading' ? '' : `<button id="p-sync">${icon(r.status === 'paused' ? 'play' : 'download')} ${r.status === 'paused' ? 'Riprendi download' : 'Scarica'}</button>`}</div></div></div>`;
+        $('#p-stream').onclick = () => startStream(c, r);
+        if ($('#p-sync')) $('#p-sync').onclick = () => guard(() => r.status === 'paused' ? api.activity.resumeDownload(c.id, r.key) : api.downloadVideo(c.id, r.key).then(() => toast('Download del video avviato')));
         player = null; return;
     }
     const speeds = [0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
-    box.innerHTML = `<video id="vid" preload="metadata" src="${recData.videoUrl}"></video>
+    box.innerHTML = `<video id="vid" preload="metadata" ${stream ? '' : `src="${recData.videoUrl}"`}></video>
         <div class="controls">
             <button id="p-play" class="icon" title="Play / pausa (spazio)" aria-label="Play">${icon('play')}</button>
             <button id="p-back" class="icon" title="−10 s (←)" aria-label="Indietro di 10 secondi">${icon('reset')}</button><button id="p-fwd" class="icon" title="+10 s (→)" aria-label="Avanti di 10 secondi">${icon('refresh')}</button>
             <span class="time" id="p-time">0:00 / 0:00</span>
             <input type="range" id="p-seek" min="0" max="1000" value="0" aria-label="Posizione">
+            ${stream ? `<span class="p-live" title="Il video non è sul computer: lo guardi da WebEx">${icon('cloud')} streaming</span>` : ''}
             <select class="speed" id="p-speed" title="Velocità (< >)" aria-label="Velocità">${speeds.map(s => `<option value="${s}" ${s === 1 ? 'selected' : ''}>${s}×</option>`).join('')}</select>
             <button id="p-skip" class="icon" title="Salta i silenzi (usa i tempi della trascrizione)" aria-label="Salta i silenzi">${icon('skip')}</button>
+            ${stream ? `<button id="p-dl" class="icon" title="Scarica il video intero sul computer" aria-label="Scarica il video">${icon('download')}</button>` : ''}
             <button id="p-full" class="icon" title="Schermo intero (F)" aria-label="Schermo intero">${icon('expand')}</button>
         </div>`;
+    if (stream) {
+        $('#p-dl').onclick = () => guard(async () => { await api.downloadVideo(c.id, r.key); toast('Download del video avviato: lo trovi in Attività'); });
+        playStream($('#vid'), stream.sources, () => {
+            box.innerHTML = `<div class="empty"><div style="text-align:center">Lo streaming non è partito<br><br><div class="row" style="justify-content:center;gap:8px"><button class="primary" id="p-retry">${icon('refresh')} Riprova</button><button id="p-dl2">${icon('download')} Scarica il video</button></div></div></div>`;
+            $('#p-retry').onclick = () => startStream(c, r, true);
+            $('#p-dl2').onclick = () => guard(async () => { await api.downloadVideo(c.id, r.key); toast('Download del video avviato'); });
+            player = null;
+        });
+    }
     const vid = player = $('#vid');
     const saved = Number(localStorage.getItem('speed') || 1); vid.playbackRate = saved; $('#p-speed').value = String(saved);
     const fromSearch = route.t != null ? Number(route.t) : null;   // opened from search: jump to that minute
@@ -586,12 +642,13 @@ function drawPlayer(c, r) {
     $('#p-play').onclick = () => vid.paused ? vid.play() : vid.pause();
     vid.onclick = () => $('#p-play').click();
     vid.ondblclick = () => $('#p-full').click();
-    vid.onplay = () => { $('#p-play').innerHTML = icon('pause'); $('#p-play').setAttribute('aria-label', 'Pausa'); };
-    vid.onpause = () => { $('#p-play').innerHTML = icon('play'); $('#p-play').setAttribute('aria-label', 'Play'); localStorage.setItem('pos:' + r.key, vid.currentTime); };
+    vid.onplay = () => { if (!vid.isConnected || !$('#p-play')) return; $('#p-play').innerHTML = icon('pause'); $('#p-play').setAttribute('aria-label', 'Pausa'); };
+    vid.onpause = () => { localStorage.setItem('pos:' + r.key, vid.currentTime); if (!vid.isConnected || !$('#p-play')) return; $('#p-play').innerHTML = icon('play'); $('#p-play').setAttribute('aria-label', 'Play'); localStorage.setItem('pos:' + r.key, vid.currentTime); };
     $('#p-back').onclick = () => vid.currentTime -= 10;
     $('#p-fwd').onclick = () => vid.currentTime += 10;
     $('#p-speed').onchange = e => { vid.playbackRate = +e.target.value; localStorage.setItem('speed', e.target.value); };
-    $('#p-full').onclick = () => document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen();
+    $('#p-full').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen()).catch(e => toast('Schermo intero non disponibile: ' + e.message));
+    box.onfullscreenchange = () => { const on = document.fullscreenElement === box; $('#p-full').title = on ? 'Esci dallo schermo intero (F / Esc)' : 'Schermo intero (F)'; $('#p-full').innerHTML = icon(on ? 'shrink' : 'expand'); };
     let skip = localStorage.getItem('skipSilence') === '1';
     const skipBtn = $('#p-skip');
     const updSkip = () => skipBtn.classList.toggle('on', skip && !!recData.segments);
@@ -600,9 +657,10 @@ function drawPlayer(c, r) {
     const seek = $('#p-seek');
     seek.oninput = () => { vid.currentTime = seek.value / 1000 * (vid.duration || 0); };
     let lastSave = 0;
-    const tick = () => { const t = vid.currentTime, d = vid.duration || 0; $('#p-time').textContent = `${fmtT(t)} / ${fmtT(d)}`; if (document.activeElement !== seek) seek.value = d ? t / d * 1000 : 0; highlightSegment(t); };
+    const tick = () => { if (!vid.isConnected) return; const t = vid.currentTime, d = vid.duration || 0; $('#p-time').textContent = `${fmtT(t)} / ${fmtT(d)}`; if (document.activeElement !== seek) seek.value = d ? t / d * 1000 : 0; highlightSegment(t); };
     vid.addEventListener('loadedmetadata', tick); vid.addEventListener('seeked', tick); vid.addEventListener('durationchange', tick);
     vid.ontimeupdate = () => {
+        if (!vid.isConnected) return;
         const t = vid.currentTime, d = vid.duration || 0;
         $('#p-time').textContent = `${fmtT(t)} / ${fmtT(d)}`;
         if (document.activeElement !== seek) seek.value = d ? t / d * 1000 : 0;
@@ -617,6 +675,47 @@ function drawPlayer(c, r) {
             }
         }
     };
+}
+
+/** Lesson not on disk: ask polideskd for the online video (WebEx login in the hidden browser if needed). */
+async function startStream(c, r, refresh) {
+    const box = $('#player'); const key = r.key;
+    box.innerHTML = `<div class="empty"><div style="text-align:center"><span class="spin"></span><br><br>Collegamento a WebEx…</div></div>`;
+    player = null;
+    try {
+        const s = await api.recStream(c.id, r.key, refresh);
+        if (route.key !== key || !$('#player')) return;
+        if (s.youtube && !(s.sources || []).length) {
+            box.innerHTML = `<div class="empty"><div style="text-align:center">Questa lezione è su YouTube<br><br><button class="primary" id="p-yt">Apri su YouTube</button></div></div>`;
+            $('#p-yt').onclick = () => api.openExternal(s.youtube);
+            return;
+        }
+        drawPlayer(c, r, s);
+    } catch (e) {
+        if (route.key !== key || !$('#player')) return;
+        box.innerHTML = `<div class="empty"><div style="text-align:center">Streaming non disponibile<br><span class="faint" style="font-size:.85em">${esc(e.message || String(e))}</span><br><br><button class="primary" id="p-retry">${icon('refresh')} Riprova</button></div></div>`;
+        $('#p-retry').onclick = () => startStream(c, r, true);
+    }
+}
+/** Try the stream URLs in order (mp4 first); HLS through hls.js when the browser has no native support. */
+function playStream(vid, sources, failed) {
+    let i = -1;
+    const next = () => {
+        if (hlsPlayer) { hlsPlayer.destroy(); hlsPlayer = null; }
+        const s = sources[++i];
+        if (!s) return failed();
+        if (s.hls && !vid.canPlayType('application/vnd.apple.mpegurl') && window.Hls && Hls.isSupported()) {
+            vid.removeAttribute('src'); vid.onerror = null;
+            hlsPlayer = new Hls({ enableWorker: false, maxBufferLength: 60 });
+            hlsPlayer.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) next(); });
+            hlsPlayer.loadSource(s.url);
+            hlsPlayer.attachMedia(vid);
+        } else {
+            vid.onerror = () => { if (vid.isConnected) next(); };
+            vid.src = s.url;
+        }
+    };
+    next();
 }
 
 function highlightSegment(t) {
@@ -651,8 +750,8 @@ function drawSide(c, r) {
     if (side === 'testo') {
         if (!recData.segments && !recData.text) {
             const tp = tprog[vpath(c, r)];
-            el.innerHTML = `<div class="empty-state"><h2>Nessuna trascrizione</h2><p>${typeof tp === 'number' ? `Trascrizione in corso: ${tp}%` : tp === 'queued' ? 'In coda per la trascrizione…' : r.videoExists ? 'Trascrivi la lezione per avere il testo sincronizzato col video.' : 'Scarica prima il video.'}</p>
-                ${r.videoExists && !tp ? `<button class="primary" id="s-tr">${icon('mic')} Trascrivi ora</button>` : ''}</div>`;
+            el.innerHTML = `<div class="empty-state"><h2>Nessuna trascrizione</h2><p>${typeof tp === 'number' ? `Trascrizione in corso: ${tp}%` : tp === 'queued' ? 'In coda per la trascrizione…' : r.videoExists || r.audioExists ? 'Trascrivi la lezione per avere il testo sincronizzato col video.' : c.streamOnly ? "L'audio della lezione si scarica alla prossima sincronizzazione, poi viene trascritto." : 'Scarica prima il video.'}</p>
+                ${(r.videoExists || r.audioExists) && !tp ? `<button class="primary" id="s-tr">${icon('mic')} Trascrivi ora</button>` : ''}</div>`;
             if ($('#s-tr', el)) $('#s-tr', el).onclick = () => guard(async () => { await api.transcribe(c.id, [r.key]); tprog[vpath(c, r)] = 'queued'; drawSide(c, r); });
             return;
         }
@@ -881,40 +980,79 @@ document.addEventListener('keydown', e => {
 });
 
 // ───────── settings ─────────
+// ───────── settings (layout of macOS System Settings: panes on the left, inset groups on the right) ─────────
+const PREF_PANES = [
+    ['generale', 'Generale', 'settings', '#8e8e93'],
+    ['aspetto', 'Aspetto', 'sun', '#0a84ff'],
+    ['sync', 'Sincronizzazione', 'refresh', '#30b158'],
+    ['trascrizione', 'Trascrizione', 'mic', '#ff9500'],
+    ['ai', 'Intelligenza artificiale', 'sparkles', '#af52de'],
+    ['appunti', 'Appunti ed esportazione', 'note', '#e6b800'],
+    ['pomodoro', 'Focus', 'timer', '#ff3b30'],
+    ['cloud', 'Cloud', 'cloud', '#32ade6'],
+    ['componenti', 'Componenti', 'box', '#636366'],
+    ['info', 'Informazioni', 'info', '#8e8e93'],
+];
 function viewSettings(v) {
     const s = S.settings, ui = s.ui || {};
     const seg = (id, val, opts) => `<div class="seg" data-seg="${id}">${opts.map(([k, l]) => `<button data-v="${k}" class="${val === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
     const prov = Object.entries(S.tools.ai).map(([k, x]) => `<option value="${k}" ${s.ai.provider === k ? 'selected' : ''} ${x.path ? '' : 'disabled'}>${esc(x.label)}${x.path ? '' : ' (non installato)'}</option>`).join('');
-    v.innerHTML = `<div class="page"><div class="page-head"><div><h1>Impostazioni</h1></div></div>
-    <div class="group"><h3>Aspetto</h3>
-        ${field('Tema', 'Normale in stile macOS, oppure Developer con font monospace e colori da editor', seg('theme', ui.theme || 'normal', [['normal', 'Normale'], ['developer', 'Developer']]))}
+    const email = s.polimiEmail || '';
+    v.innerHTML = `<div class="prefs">
+    <aside class="pf-side">
+        <div class="pf-search">${icon('search')}<input id="pf-q" placeholder="Cerca" autocomplete="off"></div>
+        <button class="pf-me" data-pane="generale"><span class="pf-av">${esc((email.match(/^[a-z]/i) || ['P'])[0].toUpperCase())}</span><span><b>${esc(email ? email.split('@')[0].replace(/\./g, ' ') : 'Account PoliMi')}</b><span>${esc(email || 'Aggiungi la tua email PoliMi')}</span></span></button>
+        <nav id="pf-nav">${PREF_PANES.map(([k, l, ic, col]) => `<button data-pane="${k}"><span class="pf-ic" style="background:${col}">${icon(ic)}</span>${l}</button>`).join('')}</nav>
+    </aside>
+    <section class="pf-main"><div class="pf-head"><button class="ghost icon" id="pf-back" title="Indietro">${icon('chevLeft')}</button><h1 id="pf-title"></h1></div><div id="pf-body">
+    <div class="group" data-pane="generale"><h3>Account PoliMi</h3>
+        ${field('Email PoliMi', 'Usata per completare il login WebEx. La password la inserisci solo nella pagina ufficiale del Politecnico.', `<input id="s-email" value="${esc(email)}" placeholder="nome.cognome@mail.polimi.it">`)}
+    </div>
+    <div class="group" data-pane="generale"><h3>Cartelle</h3>
+        ${field('Cartella dei corsi', 'Proposta quando aggiungi un corso', `<input id="s-root" value="${esc(s.defaultRoot || '')}"><button id="s-root-pick">Sfoglia…</button>`)}
+    </div>
+    <div class="group" data-pane="generale"><h3>Configurazione iniziale</h3>
+        ${field('Rivedi la configurazione', 'Account, componenti, trascrizione, strumenti AI e corsi, passo per passo', '<button id="s-onb">Apri…</button>')}
+    </div>
+    <div class="group" data-pane="aspetto"><h3>Aspetto</h3>
         ${field('Chiaro / scuro', '', seg('appearance', ui.appearance || 'auto', [['auto', 'Sistema'], ['light', 'Chiaro'], ['dark', 'Scuro']]))}
+        ${field('Tema', 'Normale in stile macOS, oppure Developer con font monospace e colori da editor', seg('theme', ui.theme || 'normal', [['normal', 'Normale'], ['developer', 'Developer']]))}
         ${field('Font', 'JetBrains Mono è incluso nell\'app', `<select id="s-font">${[['auto', 'Automatico (dal tema)'], ['system', 'Sistema (San Francisco / Segoe UI)'], ['jetbrains', 'JetBrains Mono'], ['serif', 'Serif']].map(([k, l]) => `<option value="${k}" ${(ui.font || 'auto') === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
         ${field('Dimensione testo', '', seg('size', ui.size || '', [['small', 'Piccolo'], ['', 'Normale'], ['large', 'Grande']]))}
     </div>
-    <div class="group"><h3>Sincronizzazione</h3>
+    <div class="group" data-pane="sync"><h3>Automatica</h3>
         ${field('Sincronizza all\'avvio', 'All\'apertura controlla tutti i corsi, nell\'ordine di priorità della dashboard', sw('s-onstart', s.autoSync.onStart))}
-        ${field('Ripeti ogni', 'Mentre l\'app è aperta (0 = mai)', `<input id="s-interval" type="number" min="0" max="48" style="width:90px" value="${s.autoSync.intervalHours || 0}"><span class="muted">ore</span>`)}
-        ${field('Download in parallelo', '', `<input id="s-par" type="number" min="1" max="8" style="width:90px" value="${s.parallelDownloads}">`)}
-        ${field('Mostra il browser', 'La sincronizzazione usa Chrome in background, senza finestre: il login PoliMi si apre in una finestra di PoliRec solo quando serve. Attiva per vedere Chrome mentre lavora (utile se qualcosa non funziona).', sw('s-showbrowser', !!(s.browser || {}).show))}
-        ${field('Email PoliMi', 'Usata per completare il login WebEx', `<input id="s-email" value="${esc(s.polimiEmail || '')}" placeholder="nome.cognome@mail.polimi.it">`)}
-        ${field('Cartella base', 'Proposta quando aggiungi un corso', `<input id="s-root" value="${esc(s.defaultRoot || '')}"><button id="s-root-pick">Sfoglia…</button>`)}
+        ${field('Ripeti ogni', 'Mentre l\'app è aperta (0 = mai)', `<input id="s-interval" type="number" min="0" max="48" style="width:80px" value="${s.autoSync.intervalHours || 0}"><span class="muted">ore</span>`)}
     </div>
-    <div class="group"><h3>Trascrizione</h3>
-        ${field('Motore', 'Configurato dal setup per questo computer', `<span class="pill ${s.setupDone ? 'ok' : 'warn'}">${esc(s.transcription.engine || 'auto')} · ${esc(s.transcription.model)}</span><span class="grow"></span><button id="s-setup">Rifai il setup…</button>`)}
+    <div class="group" data-pane="sync"><h3>Download</h3>
+        ${field('Download in parallelo', '', `<input id="s-par" type="number" min="1" max="8" style="width:80px" value="${s.parallelDownloads}">`)}
+        ${field('Mostra il browser', 'La sincronizzazione usa il browser in background, senza finestre: il login PoliMi si apre in una finestra di PoliDesk solo quando serve. Attiva per vedere il browser mentre lavora (utile se qualcosa non funziona).', sw('s-showbrowser', !!(s.browser || {}).show))}
+    </div>
+    <div class="group" data-pane="trascrizione"><h3>Trascrizione</h3>
+        ${field('Motore', 'Configurato per questo computer', `<span class="pill ${s.setupDone ? 'ok' : 'warn'}">${esc(s.transcription.engine || 'auto')} · ${esc(s.transcription.model)}</span><button id="s-setup">Riconfigura…</button>`)}
         ${field('Trascrivi automaticamente', 'Dopo ogni download', sw('s-tauto', s.transcription.auto))}
         ${field('Modello', 'Più grande = più preciso ma più lento', `<select id="s-model">${['tiny', 'base', 'small', 'medium', 'large-v3-turbo', 'large-v3'].map(m => `<option ${s.transcription.model === m ? 'selected' : ''}>${m}</option>`).join('')}</select>`)}
         ${field('Lingua predefinita', 'Ogni corso può sovrascriverla', `<select id="s-lang">${[['auto', 'Rilevamento automatico'], ['it', 'Italiano'], ['en', 'Inglese']].map(([k, l]) => `<option value="${k}" ${s.transcription.language === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
     </div>
-    <div class="group"><h3>AI</h3>
+    <div class="group" data-pane="ai"><h3>Strumento</h3>
         ${field('Strumento', 'CLI usata per sommari, appunti e agente', `<select id="s-prov">${prov}</select>`)}
-        ${field('Modello', 'Vuoto = predefinito del CLI', `<input id="s-aimodel" value="${esc(s.ai.model || '')}">`)}
+        ${field('Modello', 'Il modello che lo strumento usa per PoliDesk', '<select id="s-aimodel"></select>')}
+        ${field('Se finiscono i crediti', 'Cosa fare quando lo strumento ha esaurito la quota', seg('onlimit-x', s.ai.onLimit || 'ask', [['ask', 'Chiedimi'], ['model', 'Cambia modello'], ['tool', 'Altro strumento'], ['wait', 'Aspetta']]).replace('data-seg=', 'id="s-onlimit" data-x='))}
+        <div id="s-fb"></div>
+    </div>
+    <div class="group" data-pane="ai"><h3>Automatismi</h3>
         ${field('Sommario automatico', 'Dopo la trascrizione: breve descrizione degli argomenti, mostrata nel riepilogo del corso', sw('s-sum', s.ai.autoSummary))}
         ${field('Appunti automatici', 'Dopo la trascrizione genera anche gli appunti completi', sw('s-notes', s.ai.autoNotes))}
     </div>
+    <div class="group" data-pane="ai"><h3>Strumenti installati</h3><div id="s-tools"></div></div>
+    <div class="group" data-pane="componenti"><h3>Componenti</h3><p class="pf-note">Quello che PoliDesk usa sul tuo computer. Dove possibile si installa da solo, senza permessi di amministratore e senza toccare il resto del sistema.</p><div id="s-deps"><div class="field"><span class="faint"><span class="spin"></span> Controllo…</span></div></div></div>
     <div id="s-extra"></div>
-    <div class="row"><span class="faint">Configurazione: ~/.polirec/config.json</span><span class="grow"></span><button class="primary" id="s-save">Salva</button></div></div>`;
-    if (window.settingsExtra) window.settingsExtra(v);
+    <p class="pf-foot faint">Le modifiche si salvano da sole · ~/.polidesk/config.json</p>
+    </div></section></div>`;
+    if (window.settingsExtra) window.settingsExtra(v).then(() => prefsLayout(v)).catch(() => prefsLayout(v));
+    if (window.DepsUI) DepsUI.render($('#s-deps', v), { compact: false });
+    wireAiSettings(v, s.ai);
+    prefsLayout(v);
     const set = (k, val) => { S.settings.ui = { ...(S.settings.ui || {}), [k]: val }; applyUi(); };
     $$('[data-seg]', v).forEach(g => $$('button', g).forEach(b => b.onclick = () => {
         $$('button', g).forEach(x => x.classList.toggle('on', x === b));
@@ -922,59 +1060,142 @@ function viewSettings(v) {
         if (g.dataset.seg === 'appearance') api.setAppearance(b.dataset.v);
         api.saveSettings({ ui: S.settings.ui });
     }));
-    $('#s-font', v).onchange = e => { set('font', e.target.value); api.saveSettings({ ui: S.settings.ui }); };
-    $('#s-root-pick', v).onclick = async () => { const d = await api.pickDir($('#s-root', v).value); if (d) $('#s-root', v).value = d; };
-    $('#s-setup', v).onclick = () => { render.skippedSetup = false; go({ name: 'setup' }); };
-    $('#s-save', v).onclick = () => guard(async () => {
+    $('#s-font', v).onchange = e => { e.stopPropagation(); set('font', e.target.value); api.saveSettings({ ui: S.settings.ui }); };
+    $('#s-root-pick', v).onclick = async () => { const d = await api.pickDir($('#s-root', v).value); if (d) { $('#s-root', v).value = d; saveSoon(); } };
+    $('#s-setup', v).onclick = () => { render.skippedSetup = false; go({ name: 'setup', step: 'trascrizione' }); };
+    $('#s-onb', v).onclick = () => { render.skippedSetup = false; go({ name: 'setup' }); };
+    // everything outside s-extra (which saves by itself) is saved a moment after it changes, like macOS
+    let timer = null;
+    const save = () => guard(async () => {
+        const cur = S.settings;
         await api.saveSettings({
             parallelDownloads: Math.max(1, Math.min(8, +$('#s-par', v).value || 3)), polimiEmail: $('#s-email', v).value.trim(), defaultRoot: $('#s-root', v).value,
             autoSync: { onStart: $('#s-onstart', v).checked, intervalHours: Math.max(0, +$('#s-interval', v).value || 0) },
-            browser: { ...(s.browser || {}), show: $('#s-showbrowser', v).checked },
-            transcription: { ...s.transcription, auto: $('#s-tauto', v).checked, model: $('#s-model', v).value, language: $('#s-lang', v).value },
-            ai: { ...s.ai, provider: $('#s-prov', v).value, model: $('#s-aimodel', v).value, autoSummary: $('#s-sum', v).checked, autoNotes: $('#s-notes', v).checked },
+            browser: { ...(cur.browser || {}), show: $('#s-showbrowser', v).checked },
+            transcription: { ...cur.transcription, auto: $('#s-tauto', v).checked, model: $('#s-model', v).value, language: $('#s-lang', v).value },
+            ai: { ...cur.ai, ...aiSettings(v, cur.ai), autoSummary: $('#s-sum', v).checked, autoNotes: $('#s-notes', v).checked },
         });
-        toast('Impostazioni salvate'); $('#view').dataset.view = ''; refresh();
+        await refresh();
     });
+    const saveSoon = () => { clearTimeout(timer); timer = setTimeout(save, 350); };
+    $('#pf-body', v).addEventListener('change', e => { if (!e.target.closest('#s-extra') && !e.target.closest('#s-deps') && e.target.id !== 's-font') saveSoon(); });
+    $$('#s-onlimit button', v).forEach(b => b.addEventListener('click', saveSoon));
+}
+/** Sidebar navigation + search across every pane. */
+function prefsLayout(v) {
+    const body = $('#pf-body', v); if (!body) return;
+    const title = $('#pf-title', v), q = $('#pf-q', v);
+    let pane = route.pane || (() => { try { return localStorage.getItem('prefsPane'); } catch (e) { return null; } })() || 'generale';
+    if (!PREF_PANES.some(p => p[0] === pane)) pane = 'generale';
+    const show = () => {
+        const term = q.value.trim().toLowerCase();
+        $$('#pf-nav button, .pf-me', v).forEach(b => b.classList.toggle('on', !term && b.dataset.pane === pane && (b.classList.contains('pf-me') ? false : true)));
+        title.textContent = term ? 'Risultati della ricerca' : PREF_PANES.find(p => p[0] === pane)[1];
+        $$('.group', body).forEach(g => {
+            if (!term) { g.classList.toggle('hidden', g.dataset.pane !== pane); $$('.field', g).forEach(f => f.style.display = ''); return; }
+            let any = false;
+            $$('.field', g).forEach(f => { const hit = f.textContent.toLowerCase().includes(term) || (g.querySelector('h3') || {}).textContent?.toLowerCase().includes(term); f.style.display = hit ? '' : 'none'; any = any || hit; });
+            g.classList.toggle('hidden', !any);
+        });
+        const empty = term && !$$('.group:not(.hidden)', body).length;
+        let e = $('#pf-empty', body); if (!e) { e = document.createElement('div'); e.id = 'pf-empty'; e.className = 'empty-state'; body.prepend(e); }
+        e.textContent = empty ? `Nessun risultato per «${q.value.trim()}»` : ''; e.classList.toggle('hidden', !empty);
+    };
+    const open = p => { pane = p; q.value = ''; try { localStorage.setItem('prefsPane', p); } catch (e) { } show(); $('.pf-main', v).scrollTop = 0; };
+    $$('#pf-nav button, .pf-me', v).forEach(b => b.onclick = () => open(b.dataset.pane));
+    q.oninput = show;
+    $('#pf-back', v).onclick = () => goBack();
+    // groups added later (s-extra) get their card wrapper too
+    $$('.group', body).forEach(g => {
+        if (g.querySelector(':scope > .gcard')) return;
+        const card = document.createElement('div'); card.className = 'gcard';
+        [...g.childNodes].filter(n => !(n.nodeType === 1 && (n.tagName === 'H3' || n.classList.contains('pf-note')))).forEach(n => card.appendChild(n));
+        g.appendChild(card);
+    });
+    show();
 }
 
-// ───────── setup (first run) ─────────
-function viewSetup(v) {
-    v.innerHTML = `<div class="setup"><h1>Benvenuto in PoliRec</h1>
-        <p class="muted">Configuro la trascrizione per questo computer: creo un ambiente Python privato (in <code>~/.polirec</code>, non tocca il sistema), installo il motore Whisper più adatto e scarico il modello.</p>
-        <div id="su-body"><div class="empty-state"><span class="spin"></span> Analizzo il sistema…</div></div></div>`;
-    guard(async () => {
-        const { hw, rec } = await api.setupDetect();
-        const ok = x => x ? '<span style="color:var(--ok)">✓</span>' : '<span style="color:var(--err)">✗</span>';
-        $('#su-body').innerHTML = `<div class="hw">
-            <div><b>Sistema</b>${esc(hw.platform === 'darwin' ? 'macOS' : hw.platform === 'win32' ? 'Windows' : 'Linux')} · ${esc(hw.arch)}</div>
-            <div><b>Processore</b>${esc(hw.cpu)} · ${hw.cores} core</div>
-            <div><b>Memoria</b>${hw.ramGB} GB</div>
-            <div><b>Accelerazione</b>${hw.appleSilicon ? 'Apple Silicon (Metal)' : hw.nvidia ? esc(hw.nvidia.name) + ` · ${hw.nvidia.vramGB} GB` : 'Solo CPU'}</div>
-            <div><b>Browser per il login</b>${ok(hw.chrome)} ${esc(hw.chrome ? hw.chrome.split(/[\\/]/).slice(-1)[0] : 'Installa Google Chrome')}</div>
-            <div><b>Strumenti</b>${ok(hw.ffmpeg)} ffmpeg · ${hw.aria2c ? ok(1) + ' aria2c' : '<span class="faint">downloader interno</span>'}</div>
-            <div><b>Python</b>${hw.venv ? ok(1) + ' ambiente già pronto' : hw.uv ? ok(1) + ' uv' : hw.pythons.length ? ok(1) + ' ' + esc(hw.pythons[0].version) : '<span class="faint">verrà installato</span>'}</div>
-            <div><b>AI</b>${Object.entries(hw.ai).map(([k, p]) => `${ok(p)} ${k}`).join(' · ')}</div>
-        </div>
-        <div class="info-card" style="margin-top:0"><b>Configurazione consigliata</b><p style="margin:6px 0 0">Motore <b>${rec.engine === 'mlx' ? 'mlx-whisper' : 'faster-whisper'}</b> su <b>${esc(rec.device)}</b> con modello <b>${esc(rec.model)}</b>.</p>
-            <div class="row" style="margin-top:10px"><span class="muted">Modello</span><select id="su-model" style="width:auto">${['tiny', 'base', 'small', 'medium', 'large-v3-turbo'].map(m => `<option ${m === rec.model ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>
-        <div class="steps" id="su-steps"></div>
-        <div class="row"><button class="ghost" id="su-skip">Salta (niente trascrizione)</button><span class="grow"></span><button class="primary" id="su-go">Installa e continua</button></div>
-        <pre class="setup-log hidden" id="su-log"></pre>`;
-        $('#su-skip').onclick = () => guard(async () => { await api.setupSkip(); render.skippedSetup = true; await refresh(); go({ name: 'dashboard' }); });
-        $('#su-go').onclick = () => guard(async () => {
-            const steps = { python: 'Ambiente Python', engine: 'Motore di trascrizione', model: 'Modello Whisper' };
-            $('#su-steps').innerHTML = Object.entries(steps).map(([k, l]) => `<div class="step" id="st-${k}"><span class="s faint">○</span><span>${l}</span><span class="grow"></span><span class="muted d"></span></div>`).join('');
-            $('#su-log').classList.remove('hidden');
-            $('#su-go').disabled = $('#su-skip').disabled = true;
-            await api.setupInstall({ ...rec, model: $('#su-model').value });
-            toast('Setup completato');
-            await refresh(); go({ name: 'dashboard' });
-            if (!S.courses.length) openAddCourse();
+// AI tools: install status + command, model per tool, what to do when credits run out
+const AI_LIMIT_HELP = {
+    ask: 'Le note AI si fermano e PoliDesk ti chiede cosa fare.',
+    model: 'Continua con un altro modello dello stesso strumento fino al reset della quota (Antigravity: i modelli Claude e GPT hanno una quota separata da quelli Gemini).',
+    tool: 'Continua con un altro strumento AI installato.',
+    wait: 'Le note AI restano in coda e ripartono da sole quando la quota si riazzera.',
+};
+function aiSettings(v, ai) {
+    const prov = $('#s-prov', v).value, model = $('#s-aimodel', v).value;
+    const onLimit = ($('#s-onlimit .on', v) || {}).dataset?.v || 'ask';
+    const fbm = $('#s-fbmodel', v), fbp = $('#s-fbprov', v);
+    return {
+        provider: prov, model, models: { ...(ai.models || {}), [prov]: model }, onLimit,
+        fallbackModels: { ...(ai.fallbackModels || {}), ...(fbm ? { [prov]: fbm.value } : {}) },
+        fallbackProvider: fbp ? fbp.value : (ai.fallbackProvider || ''),
+    };
+}
+function wireAiSettings(v, ai) {
+    const modelsOf = {};
+    const loadModels = async p => modelsOf[p] || (modelsOf[p] = await api.aiModels(p).catch(() => []));
+    const opts = (list, cur, def) => {
+        const groups = {};
+        for (const m of list) (groups[m.group] = groups[m.group] || []).push(m);
+        const multi = Object.keys(groups).length > 1 && list.length > Object.keys(groups).length;
+        let h = def ? `<option value="">${esc(def)}</option>` : '';
+        h += Object.entries(groups).map(([g, ms]) => (multi ? `<optgroup label="Quota ${esc(g)}">` : '') + ms.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + (multi ? '</optgroup>' : '')).join('');
+        if (cur && !list.some(m => m.id === cur)) h += `<option value="${esc(cur)}" selected>${esc(cur)}</option>`;
+        return h;
+    };
+    const modelFor = p => (ai.models || {})[p] ?? (ai.provider === p ? ai.model || '' : '');
+    const drawTools = async () => {
+        const av = S.tools.ai;
+        $('#s-tools', v).innerHTML = Object.entries(av).map(([id, t]) => t.path
+            ? field(esc(t.label), `Installato · <code>${esc(t.path)}</code>`, '<span class="pill ok">✓ pronto</span>')
+            : field(esc(t.label), `Non installato. Copia il comando, incollalo nel ${esc(t.install.shell || 'Terminale')} e poi accedi con <code>${esc(t.install.login)}</code>.`,
+                `<code class="ai-cmd">${esc(t.install.cmd)}</code><button class="small" data-copy="${esc(t.install.cmd)}">${icon('copy')} Copia</button><a class="small" data-url="${esc(t.install.url)}">Sito ↗</a>`)).join('')
+            + field('', '', `<button class="small ghost" id="s-rescan">${icon('refresh')} Ho installato uno strumento: ricontrolla</button>`);
+        $$('[data-copy]', v).forEach(b => b.onclick = () => { api.copy(b.dataset.copy); toast('Comando copiato: incollalo nel terminale'); });
+        $$('[data-url]', v).forEach(a => a.onclick = () => api.openExternal(a.dataset.url));
+        $('#s-rescan', v).onclick = () => guard(async () => {
+            S.tools.ai = await api.aiRescan();
+            const sel = $('#s-prov', v), cur = sel.value;
+            sel.innerHTML = Object.entries(S.tools.ai).map(([k, x]) => `<option value="${k}" ${cur === k ? 'selected' : ''} ${x.path ? '' : 'disabled'}>${esc(x.label)}${x.path ? '' : ' (non installato)'}</option>`).join('');
+            drawTools(); drawModels(); toast('Strumenti AI ricontrollati');
         });
-    });
+    };
+    const drawFallback = async () => {
+        const p = $('#s-prov', v).value, mode = ($('#s-onlimit .on', v) || {}).dataset?.v || 'ask';
+        const box = $('#s-fb', v);
+        let h = `<p class="muted ai-limit-help">${esc(AI_LIMIT_HELP[mode])}</p>`;
+        if (mode === 'model') {
+            const list = await loadModels(p), cur = $('#s-aimodel', v).value;
+            const curGroup = (list.find(m => m.id === cur) || list[0] || {}).group; // "" = the tool's default, listed first
+            const saved = (ai.fallbackModels || {})[p];
+            const pick = saved != null ? saved : ((list.find(m => m.group !== curGroup && m.id !== cur) || {}).id || '');
+            h += field('Modello di riserva', p === 'agy' ? 'Scegline uno dell\'altro gruppo di quota' : '', `<select id="s-fbmodel">${opts(list.filter(m => m.id !== cur), pick, 'Scegli…')}</select>`);
+        } else if (mode === 'tool') {
+            const others = Object.entries(S.tools.ai).filter(([k, x]) => k !== p && x.path);
+            h += others.length ? field('Strumento di riserva', '', `<select id="s-fbprov">${others.map(([k, x]) => `<option value="${k}" ${ai.fallbackProvider === k ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}</select>`)
+                : '<p class="muted ai-limit-help"><span class="pill warn">Nessun altro strumento installato</span> installane uno qui sopra, altrimenti PoliDesk ti chiederà cosa fare.</p>';
+        }
+        box.innerHTML = h;
+    };
+    const drawModels = async () => {
+        const p = $('#s-prov', v).value, sel = $('#s-aimodel', v);
+        if (!S.tools.ai[p] || !S.tools.ai[p].path) { sel.innerHTML = '<option value="">—</option>'; sel.disabled = true; return drawFallback(); }
+        sel.disabled = true; sel.innerHTML = '<option>Carico i modelli…</option>';
+        const list = await loadModels(p);
+        sel.innerHTML = opts(list, modelFor(p), 'Predefinito dello strumento'); sel.disabled = false;
+        drawFallback();
+    };
+    $('#s-prov', v).onchange = drawModels;
+    $('#s-aimodel', v).onchange = drawFallback;
+    $$('#s-onlimit button', v).forEach(b => b.onclick = () => { $$('#s-onlimit button', v).forEach(x => x.classList.toggle('on', x === b)); drawFallback(); });
+    drawTools(); drawModels();
 }
 
-// ───────── community ─────────
+// ───────── setup (first run): onboarding in deps-ui.js ─────────
+function viewSetup(v) { v.innerHTML = ''; }
+
+// ───────── community (page hidden for now: not in the routes / sidebar / palette) ─────────
 const COMMUNITY = [
     { name: 'PoliWebex', by: 'sup3rgiu', url: 'https://github.com/sup3rgiu/PoliWebex', lic: 'MIT', used: 'Base del motore di download WebEx (codice originale in legacy/).' },
     { name: 'PoliDown', by: 'sup3rgiu', url: 'https://github.com/sup3rgiu/PoliDown', lic: 'MIT', used: 'Riferimento per il supporto ai video Microsoft Stream / SharePoint (in programma).' },
@@ -988,10 +1209,10 @@ const COMMUNITY = [
     { name: 'PoliAule', by: 'PoliNetwork', url: 'https://poliaule.com', lic: '—', used: 'Ispirazione per la sezione Aule libere.' },
     { name: 'PoliAuth', by: 'PoliAuth', url: 'https://github.com/PoliAuth/PoliAuthenticator', lic: 'nessuna', used: 'Login automatico ai Servizi Online (solo link: senza licenza non è integrabile).' },
     { name: 'PoliPlease', by: 'Alessandro Berardi', url: 'https://github.com/berryno/PoliPlease', lic: 'nessuna', used: 'Orario settimanale personalizzabile (solo link).' },
-    { name: 'Materiali e Appunti', by: 'PoliNetwork', url: 'https://polinetwork.org/it/materials/', lic: '—', used: 'Archivio di appunti degli studenti.' },
+    { name: 'Materiali e Appunti', by: 'PoliNetwork', url: 'https://polinetwork.org/it/materials/view/', lic: '—', used: 'Integrato: appunti, temi d\'esame e materiale degli studenti, divisi per corso di laurea e anno (repository GitLab). Nella Panoramica di ogni corso c\'è il link alla sua cartella e la scheda «Appunti PoliNetwork» per scegliere cosa scaricare.' },
 ];
 function viewCommunity(v) {
-    v.innerHTML = `<div class="page community"><div class="page-head"><div><h1>Community</h1><div class="sub">PoliRec è costruito sul lavoro della community studentesca del Politecnico, in particolare dei progetti raccolti da <a data-ext="https://polinetwork.org/it/projects/">PoliNetwork</a>. Grazie!</div></div></div>
+    v.innerHTML = `<div class="page community"><div class="page-head"><div><h1>Community</h1><div class="sub">PoliDesk è costruito sul lavoro della community studentesca del Politecnico, in particolare dei progetti raccolti da <a data-ext="https://polinetwork.org/it/projects/">PoliNetwork</a>. Grazie!</div></div></div>
         <div class="grid">${COMMUNITY.map(p => `<div class="card"><div class="t">${esc(p.name)} <span class="pill ${p.lic === 'MIT' ? 'ok' : p.lic.startsWith('GPL') ? 'acc' : ''}">${esc(p.lic)}</span></div>
             <div class="muted">di ${esc(p.by)}</div><div>${esc(p.used)}</div><div><a data-ext="${esc(p.url)}">${esc(p.url.replace(/^https?:\/\//, ''))} ↗</a></div></div>`).join('')}</div></div>`;
     $$('[data-ext]', v).forEach(a => a.onclick = () => api.openExternal(a.dataset.ext));
@@ -1079,7 +1300,7 @@ let rafPending = false;
 // Views with their own state (editors, forms, players, async pages) must not be rebuilt on background
 // events: only the sidebar is refreshed. Data-driven lists (dashboard, lessons…) re-render.
 const isSticky = () => ['recording', 'settings', 'setup', 'notes', 'calendar', 'rooms', 'todos', 'community', 'search'].includes(route.name)
-    || ['impostazioni', 'panoramica'].includes(route.tab);
+    || ['impostazioni', 'panoramica', 'polinetwork'].includes(route.tab);
 const soft = () => { if (rafPending) return; rafPending = true; requestAnimationFrame(() => { rafPending = false; if (!S) return; if (isSticky()) { renderSidebar(); return; } $('#view').dataset.view = ''; render(); }); };
 let refreshT = null;
 const softRefresh = () => { clearTimeout(refreshT); refreshT = setTimeout(async () => { if (!isSticky()) $('#view').dataset.view = ''; await refresh(); }, 400); };
@@ -1095,7 +1316,7 @@ document.addEventListener('click', e => {
 
 api.on(e => {
     switch (e.type) {
-        case 'login-required': $('#banner').textContent = e.id ? '🔐 Accedi al Politecnico (PoliMi/SPID) nella finestra di login di PoliRec: la sincronizzazione riprende da sola.' : '🔐 Login richiesto: completa l\'accesso PoliMi/SPID nella finestra di Chrome che si è aperta.'; $('#banner').classList.remove('hidden'); break;
+        case 'login-required': $('#banner').textContent = e.id ? '🔐 Accedi al Politecnico (PoliMi/SPID) nella finestra di login di PoliDesk: la sincronizzazione riprende da sola.' : '🔐 Login richiesto: completa l\'accesso PoliMi/SPID nella finestra di Chrome che si è aperta.'; $('#banner').classList.remove('hidden'); break;
         case 'login-done': $('#banner').classList.add('hidden'); break;
         case 'sync-state': if (S) S.syncing = e.syncing; if (!e.syncing) { running.clear(); $('#banner').classList.add('hidden'); } soft(); break;
         case 'download-paused': case 'download-queued': softRefresh(); break;
@@ -1121,6 +1342,7 @@ api.on(e => {
         case 'setup-step': { const st = $('#st-' + e.step); if (st) { $('.s', st).innerHTML = e.status === 'done' ? '<span style="color:var(--ok)">✓</span>' : '<span class="spin"></span>'; $('.d', st).textContent = e.detail; } break; }
         case 'setup-log': { const l = $('#su-log'); if (l) { l.textContent += e.line + '\n'; l.scrollTop = 1e9; } break; }
         case 'refresh': softRefresh(); break;
+        case 'pn-progress': case 'pn-done': if (window.PnUI) PnUI.onEvent(e); break;
         case 'teacher-choice': refresh().then(() => { const c = course(e.course); if (c) { teacherAsked.delete(c.id); askTeachers(c, { auto: true }); } }); break;
     }
 });

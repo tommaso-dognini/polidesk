@@ -33,9 +33,10 @@ function toggleTheme() {
     const next = dark ? 'light' : 'dark'; setUi({ appearance: next }); api.setAppearance(next);
 }
 function setUi(patch) { S.settings.ui = { ...(S.settings.ui || {}), ...patch }; applyUi(); api.saveSettings({ ui: S.settings.ui }); }
-function goSettings(section) {
-    go({ name: 'settings' });
-    setTimeout(() => { const h = $$('.group h3').find(x => x.textContent.toLowerCase().startsWith(section.toLowerCase())); if (h) h.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 400);
+function goSettings(pane) {
+    try { localStorage.setItem('prefsPane', pane); } catch (e) { }
+    $('#view').dataset.view = '';
+    go({ name: 'settings', pane });
 }
 const COURSE_TABS = ['panoramica', 'lezioni', 'materiale'];
 function cycleTab(d) {
@@ -57,19 +58,19 @@ const nthCourse = n => S.courses[n - 1];
 function commands() {
     const nav = (id, label, r, icon, keys, kw = '') => ({ id, g: 'Vai a', label, icon, keys, kw, run: () => go(r) });
     const cmds = [
-        nav('go.dashboard', 'Dashboard', { name: 'dashboard' }, 'home', 'mod+1', 'home inizio'),
-        nav('go.notes', 'Appunti', { name: 'notes' }, 'note', 'mod+2', 'note'),
-        nav('go.calendar', 'Calendario', { name: 'calendar' }, 'calendar', 'mod+3', 'orario settimana'),
-        nav('go.rooms', 'Aule libere', { name: 'rooms' }, 'pin', 'mod+4', 'aule stanze'),
-        nav('go.todos', 'Da fare', { name: 'todos' }, 'check', 'mod+5', 'todo attività'),
+        nav('go.dashboard', 'Dashboard', { name: 'dashboard' }, 'home', 'mod+alt+1', 'home inizio'),
+        nav('go.notes', 'Appunti', { name: 'notes' }, 'note', 'mod+alt+2', 'note'),
+        nav('go.calendar', 'Calendario', { name: 'calendar' }, 'calendar', 'mod+alt+3', 'orario settimana'),
+        nav('go.rooms', 'Aule libere', { name: 'rooms' }, 'pin', 'mod+alt+4', 'aule stanze'),
+        nav('go.todos', 'Da fare', { name: 'todos' }, 'check', 'mod+alt+5', 'todo attività'),
         nav('go.search', 'Cerca nelle lezioni', { name: 'search' }, 'search', 'mod+shift+f', 'ricerca semantica trova'),
-        nav('go.community', 'Community', { name: 'community' }, 'users', '', ''),
+        // nav('go.community', 'Community', { name: 'community' }, 'users', '', ''),   // Community page hidden for now
         nav('go.settings', 'Impostazioni', { name: 'settings' }, 'settings', 'mod+,', 'preferenze opzioni'),
         { id: 'nav.back', g: 'Vai a', label: 'Indietro', icon: 'back', keys: 'mod+[', kw: 'back', run: goBack },
         { id: 'nav.fwd', g: 'Vai a', label: 'Avanti', icon: 'forward', keys: 'mod+]', kw: 'forward', run: goForward },
 
         ...S.courses.flatMap((c, i) => [
-            { id: 'course:' + c.id, g: 'Corsi', label: cname(c), icon: 'book', keys: i < 9 ? `g ${i + 1}` : '', kw: 'corso ' + (c.manifest.course ? c.manifest.course.fullname : ''), course: true, run: () => go({ name: 'course', courseId: c.id, tab: 'panoramica' }) },
+            { id: 'course:' + c.id, g: 'Corsi', label: cname(c), icon: 'book', keys: i < 9 ? `mod+${i + 1}` : '', kw: 'corso ' + (c.manifest.course ? c.manifest.course.fullname : ''), course: true, run: () => go({ name: 'course', courseId: c.id, tab: 'panoramica' }) },
             { id: 'course.lez:' + c.id, g: 'Corsi', label: `${cname(c)} › Lezioni`, icon: 'video', kw: 'registrazioni video', course: true, run: () => go({ name: 'course', courseId: c.id, tab: 'lezioni' }) },
             { id: 'course.mat:' + c.id, g: 'Corsi', label: `${cname(c)} › Materiale`, icon: 'folder', kw: 'slide pdf', course: true, run: () => go({ name: 'course', courseId: c.id, tab: 'materiale' }) },
         ]),
@@ -83,8 +84,9 @@ function commands() {
         { id: 'ai.backfill', g: 'Azioni', label: 'Applica le funzioni AI alle lezioni già trascritte', icon: 'sparkles', kw: 'sommari appunti backfill', run: async () => { const n = await api.aiBackfill(); toast(n ? `${n} attività AI in coda` : 'Niente da fare'); } },
         { id: 'search.index', g: 'Azioni', label: 'Aggiorna indice di ricerca', icon: 'search', kw: 'search index', run: async () => { toast('Indicizzo…'); await api.search.index(); toast('Indice aggiornato'); } },
         { id: 'cal.sync', g: 'Azioni', label: 'Aggiorna orario delle lezioni', icon: 'calendar', kw: 'calendario timetable', run: async () => { await api.cal.sync(); toast('Orario aggiornato'); } },
-        { id: 'pomo.toggle', g: 'Pomodoro', label: Pomo.st.running ? 'Pomodoro: pausa' : 'Pomodoro: avvia', icon: 'timer', keys: 'mod+shift+t', kw: 'timer focus', run: () => Pomo.st.running ? Pomo.pause() : Pomo.start() },
-        { id: 'pomo.reset', g: 'Pomodoro', label: 'Pomodoro: azzera', icon: 'reset', kw: 'timer', run: () => Pomo.reset() },
+        { id: 'pomo.new', g: 'Focus', label: 'Focus: nuova sessione…', icon: 'timer', kw: 'pomodoro timer studio', run: () => openFocusSheet() },
+        { id: 'pomo.toggle', g: 'Focus', label: !Pomo.active ? 'Focus: avvia con le impostazioni predefinite' : Pomo.st.running ? 'Focus: pausa' : 'Focus: riprendi', icon: Pomo.st.running ? 'pause' : 'play', keys: 'mod+shift+t', kw: 'pomodoro timer', run: () => Pomo.toggle() },
+        ...(Pomo.active ? [{ id: 'pomo.plus', g: 'Focus', label: 'Focus: aggiungi 5 minuti', icon: 'plus', kw: 'pomodoro timer', run: () => Pomo.addMinutes(5) }, { id: 'pomo.stop', g: 'Focus', label: 'Focus: termina la sessione', icon: 'reset', kw: 'pomodoro timer stop', run: () => Pomo.stop() }] : []),
 
         { id: 'ui.sidebar', g: 'Vista', label: 'Mostra/nascondi barra laterale', icon: 'sidebar', keys: 'mod+backslash', kw: 'sidebar', run: () => window.toggleSidebar(!$('#app').classList.contains('sb-collapsed')) },
         { id: 'ui.activity', g: 'Vista', label: 'Mostra/nascondi registro attività', icon: 'terminal', keys: 'mod+j', kw: 'log attività console', run: () => toggleActivity() },
@@ -94,8 +96,7 @@ function commands() {
         { id: 'ui.font', g: 'Vista', label: (S.settings.ui || {}).font === 'jetbrains' ? 'Font: Sistema' : 'Font: JetBrains Mono', icon: 'sun', kw: 'font carattere', run: () => setUi({ font: (S.settings.ui || {}).font === 'jetbrains' ? 'system' : 'jetbrains' }) },
         { id: 'ui.keys', g: 'Vista', label: 'Scorciatoie da tastiera', icon: 'keyboard', keys: '?', kw: 'shortcut tasti aiuto help', run: showShortcuts },
 
-        ...[['Trascrizione', 'whisper motore'], ['AI', 'assistente provider'], ['Integrazioni', 'notion goodnotes obsidian apple'], ['Sincronizzazione cloud', 'icloud drive'], ['Appunti', 'latex typst markdown'], ['Pomodoro', 'timer'], ['Aspetto', 'tema font']]
-            .map(([sec, kw]) => ({ id: 'set:' + sec, g: 'Impostazioni', label: `Impostazioni › ${sec}`, icon: 'settings', kw, run: () => goSettings(sec) })),
+        ...PREF_PANES.map(([k, l, ic]) => ({ id: 'set:' + k, g: 'Impostazioni', label: `Impostazioni › ${l}`, icon: ic, kw: { trascrizione: 'whisper motore', ai: 'assistente provider modello crediti', appunti: 'latex typst markdown notion goodnotes obsidian esporta', pomodoro: 'pomodoro timer', cloud: 'icloud drive', aspetto: 'tema font scuro', componenti: 'chrome browser python installa', generale: 'email cartella account' }[k] || '', run: () => goSettings(k) })),
     ];
 
     // context: commands for the current page
@@ -270,8 +271,8 @@ function showShortcuts() {
     if (pal) pal.close(false);
     const groups = [
         ['Generale', [['mod+k', 'Command palette (anche ⇧⌘P)'], ['?', 'Questo elenco'], ['/', 'Cerca nella pagina'], ['mod+[', 'Indietro'], ['mod+]', 'Avanti'], ['mod+backslash', 'Barra laterale'], ['mod+j', 'Registro attività'], ['mod+shift+l', 'Chiaro / scuro'], ['esc', 'Chiudi']]],
-        ['Vai a', [['mod+1', 'Dashboard'], ['mod+2', 'Appunti'], ['mod+3', 'Calendario'], ['mod+4', 'Aule libere'], ['mod+5', 'Da fare'], ['mod+shift+f', 'Cerca nelle lezioni'], ['mod+,', 'Impostazioni'], ['g 1', 'Corso 1…9 (g poi numero)'], ['g d', 'Dashboard (anche g n, g c, g a, g t, g s, g i)']]],
-        ['Azioni', [['mod+n', 'Nuovo appunto'], ['mod+shift+s', 'Sincronizza tutti i corsi'], ['mod+shift+t', 'Pomodoro avvia/pausa'], ['ctrl+tab', 'Scheda successiva del corso'], ['ctrl+shift+tab', 'Scheda precedente']]],
+        ['Vai a', [['mod+alt+1', 'Dashboard'], ['mod+alt+2', 'Appunti'], ['mod+alt+3', 'Calendario'], ['mod+alt+4', 'Aule libere'], ['mod+alt+5', 'Da fare'], ['mod+shift+f', 'Cerca nelle lezioni'], ['mod+,', 'Impostazioni'], ['mod+1', 'Corso 1…9 (anche g poi numero)'], ['g d', 'Dashboard (anche g n, g c, g a, g t, g s, g i)']]],
+        ['Azioni', [['mod+n', 'Nuovo appunto'], ['mod+shift+s', 'Sincronizza tutti i corsi'], ['mod+shift+t', 'Focus: avvia / pausa'], ['ctrl+tab', 'Scheda successiva del corso'], ['ctrl+shift+tab', 'Scheda precedente']]],
         ['Corso', [['j', 'Lezione successiva nell\'elenco'], ['k', 'Lezione precedente nell\'elenco'], ['enter', 'Apri la lezione']]],
         ['Lezione', [['space', 'Play / pausa'], ['[', 'Lezione precedente'], [']', 'Lezione successiva'], ['left', '−10 s'], ['right', '+10 s'], ['f', 'Schermo intero'], ['.', 'Più veloce'], [',', 'Più lento']]],
         ['Appunti', [['mod+s', 'Salva'], ['mod+enter', 'Compila (LaTeX, Typst)'], ['mod+shift+e', 'Elenco file']]],
@@ -302,8 +303,15 @@ document.addEventListener('keydown', e => {
     const t = typing();
 
     if (mod && !e.altKey) {
-        const digit = /^Digit([1-5])$/.exec(e.code);
-        if (digit && !e.shiftKey) { e.preventDefault(); go({ name: ['dashboard', 'notes', 'calendar', 'rooms', 'todos'][+digit[1] - 1] }); return; }
+        // ⌘1–9: course pages · ⌥⌘1–5: main sections (e.code: ⌥ changes e.key on macOS)
+        const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+        if (digit && !e.shiftKey && !e.altKey) { e.preventDefault(); const c = nthCourse(+digit[1]); if (c) go({ name: 'course', courseId: c.id, tab: 'panoramica' }); return; }
+    }
+    if (mod && e.altKey && !e.shiftKey) {
+        const digit = /^(?:Digit|Numpad)([1-5])$/.exec(e.code);
+        if (digit) { e.preventDefault(); go({ name: ['dashboard', 'notes', 'calendar', 'rooms', 'todos'][+digit[1] - 1] }); return; }
+    }
+    if (mod && !e.altKey) {
         if (k === ',' && !e.shiftKey) { e.preventDefault(); go({ name: 'settings' }); return; }
         if (!t && (k === '[' || e.code === 'BracketLeft') && !e.shiftKey) { e.preventDefault(); goBack(); return; }
         if (!t && (k === ']' || e.code === 'BracketRight') && !e.shiftKey) { e.preventDefault(); goForward(); return; }
@@ -311,7 +319,7 @@ document.addEventListener('keydown', e => {
         if (k === 'n' && !e.shiftKey && route.name !== 'notes') { e.preventDefault(); guard(() => newNote()); return; }   // in notes: views.js
         if (e.shiftKey && k === 'f') { e.preventDefault(); go({ name: 'search' }); return; }
         if (e.shiftKey && k === 's') { e.preventDefault(); api.sync(); toast('Sincronizzazione avviata'); return; }
-        if (e.shiftKey && k === 't') { e.preventDefault(); Pomo.st.running ? Pomo.pause() : Pomo.start(); toast(Pomo.st.running ? 'Pomodoro avviato' : 'Pomodoro in pausa', 1500); return; }
+        if (e.shiftKey && k === 't') { e.preventDefault(); Pomo.toggle(); toast(Pomo.st.running ? 'Focus avviato' : 'Focus in pausa', 1500); return; }
         if (!t && e.shiftKey && k === 'l') { e.preventDefault(); toggleTheme(); return; }
     }
     if (!t && !IS_MAC && e.altKey && !e.ctrlKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) { e.preventDefault(); e.key === 'ArrowLeft' ? goBack() : goForward(); return; }

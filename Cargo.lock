@@ -997,18 +997,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
-name = "polirec"
+name = "polidesk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "polirec-core",
+ "polidesk-core",
  "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "polirec-core"
+name = "polidesk-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1018,6 +1018,7 @@ dependencies = [
  "chrono-tz",
  "dirs",
  "fancy-regex",
+ "flate2",
  "futures-util",
  "gethostname",
  "libc",
@@ -1026,19 +1027,20 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha1",
  "tokio",
  "trash",
  "uuid",
 ]
 
 [[package]]
-name = "polirecd"
+name = "polideskd"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
- "polirec-core",
+ "polidesk-core",
  "regex",
  "serde",
  "serde_json",

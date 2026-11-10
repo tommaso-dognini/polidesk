@@ -1,6 +1,6 @@
 'use strict';
 // Background activity: bottom bar (status + what's running), panel with downloads / transcriptions / AI
-// (pause and resume each one, or all of them), activity log (kept by polirecd, so it survives closing
+// (pause and resume each one, or all of them), activity log (kept by polideskd, so it survives closing
 // the window), and the "connect your external drive" popup.
 (() => {
     const A = { snap: null, log: [], tab: localStorage.getItem('actTab') || 'run', filter: 'all', q: '', drivesShown: new Set(), driveModal: null };
@@ -34,7 +34,7 @@
         && (!A.q || (e.msg + ' ' + (e.courseName || '')).toLowerCase().includes(A.q));
     const logRow = e => `<div class="al-row lv-${e.level}"><span class="al-t">${time(e.t)}</span><span class="al-i">${LEVEL_ICON[e.level] || '·'}</span>${e.courseName ? `<span class="al-c" title="${esc(e.courseName)}">${esc(e.courseName)}</span>` : ''}<span class="al-m">${esc(String(e.msg).trim())}</span></div>`;
 
-    // ───────── snapshot from polirecd ─────────
+    // ───────── snapshot from polideskd ─────────
     let fetching = null;
     async function load() {
         if (fetching) return fetching;
@@ -113,7 +113,7 @@
         const ai = s.ai;
         if (ai.paused) sec.push(`<section class="ap-sec"><h4>${icon('sparkles')} AI <span class="faint">in pausa</span></h4>
             <div class="ap-row"><div class="ap-main"><b>${esc(ai.paused.label)} ${ai.paused.kind === 'quota' ? 'ha esaurito la quota' : 'richiede il login'}</b><div class="faint">${ai.pending ? `${ai.pending} note AI in attesa` : 'note AI in pausa'}${ai.paused.resetsAt ? ' · reset ' + new Date(ai.paused.resetsAt).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</div></div>
-            <button class="small primary" id="ai-pick">Scegli strumento…</button><button class="small" id="ai-retry">Riprova</button></div></section>`);
+            ${ai.paused.auto === 'wait' ? '<span class="faint">riparte da sola al reset</span>' : ''}<button class="small primary" id="ai-pick">Cambia strumento o modello…</button><button class="small" id="ai-retry">Riprova</button></div></section>`);
         else if (ai.current || ai.pending) sec.push(`<section class="ap-sec"><h4>${icon('sparkles')} AI <span class="faint">${(ai.current ? 1 : 0) + (ai.pending || 0)}</span></h4>
             ${ai.current ? `<div class="ap-row"><span class="spin"></span><div class="ap-main">${esc(ai.current)}</div></div>` : ''}
             ${ai.pending ? `<div class="ap-none">altri ${ai.pending} in coda (sommari, appunti, pagine dei corsi)</div>` : ''}</section>`);
@@ -204,7 +204,7 @@
             <h2>Collega il disco «${esc(d.name)}»</h2>
             <p>Le registrazioni e i file di ${d.courses.length === 1 ? 'questo corso sono' : 'questi corsi sono'} sul disco esterno, che ora non è collegato:</p>
             <ul>${d.courses.map(c => `<li>${esc(c.name)}</li>`).join('')}</ul>
-            <div class="dp-wait"><span class="spin"></span> In attesa del disco… appena lo colleghi PoliRec lo trova e risincronizza.</div>
+            <div class="dp-wait"><span class="spin"></span> In attesa del disco… appena lo colleghi PoliDesk lo trova e risincronizza.</div>
             <div class="row end"><button id="dp-later">Più tardi</button><button id="dp-dir">Cambia cartella…</button></div></div>`);
         A.driveModal = { path: d.path, el: m.el, close: () => { m.close(); A.driveModal = null; } };
         $('#dp-later', m.el).onclick = () => A.driveModal.close();
@@ -233,27 +233,52 @@
     function aiLimitModal(e) {
         if (aiModalFor === e.provider && document.querySelector('.ai-limit')) return;
         aiModalFor = e.provider;
+        const quota = e.kind === 'quota';
         const when = e.resetsAt ? new Date(e.resetsAt).toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '';
-        const alt = e.alternatives || [], inst = e.installable || [];
-        const m = modal(`<div class="ai-limit drive-pop">
-            <div class="dp-ico">⚠️</div>
-            <h2>${esc(e.label)} ${e.kind === 'quota' ? 'ha esaurito la quota' : 'richiede il login'}</h2>
-            <p>${e.kind === 'quota' ? (when ? `La quota si riazzera ${esc(when)}.` : 'Riprova più tardi.') : `Accedi dal terminale (${esc(e.provider)}) e riprova.`} Le note AI in coda sono in pausa.</p>
-            <p class="faint" style="font-size:.85em">${esc(e.error)}</p>
-            ${alt.length ? `<p><b>Vuoi usare un altro strumento?</b></p><div class="row" style="display:flex;gap:8px;flex-wrap:wrap">${alt.map(a => `<button class="primary" data-use="${a.id}">Usa ${esc(a.label)}</button>`).join('')}</div>
-                <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="al-rem"> Usalo sempre (cambia l'impostazione)</label>`
-                : '<p><b>Non ci sono altri strumenti AI installati.</b></p>'}
-            ${inst.length ? `<details><summary>Installa un altro strumento</summary><ul>${inst.map(i => `<li><b>${esc(i.label)}</b>${i.install && i.install.cmd ? ` — <code>${esc(i.install.cmd)}</code>` : ''}${i.install && i.install.login ? `, poi <code>${esc(i.install.login)}</code>` : ''}</li>`).join('')}</ul></details>` : ''}
-            <div class="row end"><button id="al-wait">${e.kind === 'quota' ? 'Aspetta il reset' : 'Più tardi'}</button></div></div>`);
-        $$('[data-use]', m.el).forEach(b => b.onclick = () => guard(async () => { await api.aiSwitch.use(b.dataset.use, $('#al-rem', m.el).checked); m.close(); toast('Note AI riprese con ' + b.textContent.replace(/^Usa /, '')); load(); }));
+        const alt = e.alternatives || [];
+        const m = modal(`<div class="ai-limit">
+            <h2>${esc(e.label)} ${quota ? 'ha finito i crediti' : 'richiede il login'}</h2>
+            <p class="muted">${quota ? (when ? `La quota si riazzera ${esc(when)}.` : 'La quota si riazzererà più tardi.') : `Accedi dal terminale con <code>${esc(e.provider)}</code> e riprova.`} Le note AI in coda sono in pausa.</p>
+            <label class="l">Continua con<select id="al-pick"></select><span class="help" id="al-help"></span></label>
+            <details class="al-err"><summary>Dettagli dell'errore</summary><div class="mono">${esc(e.error)}</div></details>
+            <div class="foot"><button class="ghost" id="al-set">Impostazioni AI…</button><span class="grow"></span><button id="al-wait">${quota ? 'Aspetta il reset' : 'Più tardi'}</button><button class="primary" id="al-go">Continua</button></div></div>`);
+        const sel = $('#al-pick', m.el), help = $('#al-help', m.el), goBtn = $('#al-go', m.el);
+        const opt = (v, l) => `<option value="${esc(v)}">${esc(l)}</option>`;
+        const draw = (models = [], cur) => {
+            // other models of the same tool, those of another quota group first (Antigravity: Gemini vs Claude/GPT)
+            const others = models.filter(x => x.id !== e.model).sort((a, b) => (cur && a.group === cur.group) - (cur && b.group === cur.group));
+            const groups = [...new Set(others.map(x => x.group || ''))];
+            sel.innerHTML = (quota ? groups.map(g => `<optgroup label="${esc(e.label)}${g ? ' · ' + esc(g) : ''}${cur && g === cur.group ? ' (stessa quota)' : ''}">${others.filter(x => (x.group || '') === g).map(x => opt('m:' + x.id, x.label)).join('')}</optgroup>`).join('') : '')
+                + (alt.length ? `<optgroup label="Altri strumenti">${alt.map(a => opt('t:' + a.id, a.label)).join('')}</optgroup>` : '');
+            goBtn.disabled = !sel.options.length;
+            const upd = () => {
+                const v = sel.value || '', x = others.find(o => 'm:' + o.id === v);
+                help.textContent = !v ? 'Nessun altro modello o strumento disponibile: installane uno dalle impostazioni.'
+                    : x && cur && x.group === cur.group ? 'Questo modello condivide la quota esaurita: probabilmente fallirà anche lui.'
+                    : x ? `Solo fino al reset della quota, poi si torna al modello abituale.` : 'Le note riprendono con questo strumento e il suo modello.';
+            };
+            sel.onchange = upd; upd();
+        };
+        draw();
+        if (quota) api.aiModels(e.provider).then(list => { if (document.body.contains(sel)) draw(list, list.find(x => x.id === e.model)); }).catch(() => { });
+        goBtn.onclick = () => guard(async () => {
+            const v = sel.value, label = sel.selectedOptions[0]?.textContent || '';
+            if (v.startsWith('m:')) await api.aiSwitch.use(e.provider, false, v.slice(2));
+            else await api.aiSwitch.use(v.slice(2), false);
+            m.close(); toast('Note AI riprese con ' + label); load();
+        });
         $('#al-wait', m.el).onclick = () => guard(async () => { await api.aiSwitch.wait(); m.close(); });
+        $('#al-set', m.el).onclick = () => {
+            m.close(); try { localStorage.setItem('prefsPane', 'ai'); } catch (x) { }
+            $('#view').dataset.view = ''; go({ name: 'settings', pane: 'ai' });
+        };
     }
 
     // ───────── events ─────────
     api.on(e => {
         switch (e.type) {
             case 'activity-log': addLog(e.entry); break;
-            case 'ai-limit': aiLimitModal(e); load(); break;
+            case 'ai-limit': if (!e.auto) aiLimitModal(e); load(); break;
             case 'ai-resumed': load(); break;
             case 'activity': load(); break;
             case 'progress': liveProgress(e); break;
@@ -266,7 +291,7 @@
         }
     });
 
-    // history kept by polirecd (also what happened while the window was closed)
+    // history kept by polideskd (also what happened while the window was closed)
     api.activity.log().then(entries => { A.log = entries.concat(A.log.filter(e => e.local)); const last = entries[entries.length - 1]; if (last) status(last.msg, last.level === 'err' ? 'err' : 'info'); }).catch(() => { });
     load().then(() => { if (!busy()) $('#act-dot').className = 'dot idle'; });
     setTimeout(checkDrives, 1200);

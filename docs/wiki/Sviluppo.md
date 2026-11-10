@@ -3,20 +3,20 @@
 ## Avvio da sorgente
 
 ```bash
-git clone <repo> polirec && cd polirec
+git clone <repo> polidesk && cd polidesk
 npm install
 npm start
 ```
 
-Requisiti: **Node.js 22+**, **Rust** stable ([rustup](https://rustup.rs)), **Google Chrome**, Git. Per la trascrizione il setup dell'app crea `~/.polirec/venv` (Python 3.10+, oppure uv).
+Requisiti: **Node.js 22+**, **Rust** stable ([rustup](https://rustup.rs)), **Google Chrome**, Git. Per la trascrizione il setup dell'app crea `~/.polidesk/venv` (Python 3.10+, oppure uv).
 
 ## Script npm
 
 | Comando | Cosa fa |
 |---|---|
 | `npm start` | Compila l'editor e il backend Rust (`prestart`) e avvia l'app Electron |
-| `npm run build:rust` | Compila `polirecd` e `polirec` in release |
-| `npm run daemon` | Avvia `polirecd` in primo piano (log sul terminale) |
+| `npm run build:rust` | Compila `polideskd` e `polidesk` in release |
+| `npm run daemon` | Avvia `polideskd` in primo piano (log sul terminale) |
 | `npm run cli -- <comando>` | Riga di comando (vedi [Riga di comando](Riga-di-comando.md)) |
 | `npm run mcp` | Server MCP su stdio (vedi [Server MCP](Server-MCP.md)) |
 | `npm run build:editor` | Crea il bundle CodeMirror, markdown-it e KaTeX in `src/renderer/vendor/editor.js` (esbuild) |
@@ -26,22 +26,22 @@ Requisiti: **Node.js 22+**, **Rust** stable ([rustup](https://rustup.rs)), **Goo
 ## Architettura
 
 ```
- Electron (interfaccia)      polirec (CLI)      polirec mcp (Claude & co.)
+ Electron (interfaccia)      polidesk (CLI)      polidesk mcp (Claude & co.)
           │                       │                        │
           └──────── socket locale, JSON a righe ───────────┘
                                   │
-                       polirecd (Rust, sempre attivo)
+                       polideskd (Rust, sempre attivo)
      configurazione · corsi · appunti · code di sync, trascrizione e AI · indice semantico
           │                 │                    │                    │
    Chrome via CDP     aria2c / ffmpeg     worker Python        CLI AI (agy, claude, gemini)
    (login, WeBeep)    (download)          (Whisper, fastembed)
 ```
 
-**polirecd** fa tutto ciò che non è interfaccia. Parte da solo alla prima richiesta (app, CLI o MCP) e resta attivo
+**polideskd** fa tutto ciò che non è interfaccia. Parte da solo alla prima richiesta (app, CLI o MCP) e resta attivo
 anche a finestra chiusa, così download, trascrizioni e note AI continuano. Un solo processo possiede code, profilo
 di Chrome e indice: app, CLI e MCP vedono sempre lo stesso stato. In memoria occupa circa 12 MB.
 
-Protocollo (`crates/polirec-core/src/rpc.rs`): un oggetto JSON per riga su un socket Unix (`~/.polirec/polirecd.sock`,
+Protocollo (`crates/polidesk-core/src/rpc.rs`): un oggetto JSON per riga su un socket Unix (`~/.polidesk/polideskd.sock`,
 permessi 0600) o una named pipe su Windows.
 
 ```
@@ -57,7 +57,7 @@ li inoltra senza tradurli. CLI e MCP usano i metodi `api:*`.
 
 ```
 crates/
-├── polirec-core/        tutta la logica (libreria)
+├── polidesk-core/        tutta la logica (libreria)
 │   ├── rpc.rs           protocollo e client del server
 │   ├── config.rs · library.rs · indexpage.rs   configurazione, manifest, INDICE.html
 │   ├── browser.rs       Chrome via DevTools Protocol (chromiumoxide), profilo persistente, login assistito
@@ -68,12 +68,12 @@ crates/
 │   ├── schedule.rs · timetable.rs · rooms.rs     orario (port di polimi-schedule-js), calendario, aule libere
 │   ├── notes.rs · workspace.rs · cloud.rs · integrations.rs
 │   └── api.rs           funzioni per CLI e MCP
-├── polirecd/            il server: socket, metodi, code (sync → trascrizione → AI → indice)
-└── polirec/             CLI e server MCP (client del server)
+├── polideskd/            il server: socket, metodi, code (sync → trascrizione → AI → indice)
+└── polidesk/             CLI e server MCP (client del server)
 src/
-├── main.js              Electron: finestra, dialoghi, PDF, protocollo media://, ponte verso polirecd
-├── daemon-client.js     client del socket: avvia, aggiorna e riconnette polirecd
-├── preload.js           API esposta al renderer (window.polirec)
+├── main.js              Electron: finestra, dialoghi, PDF, protocollo media://, ponte verso polideskd
+├── daemon-client.js     client del socket: avvia, aggiorna e riconnette polideskd
+├── preload.js           API esposta al renderer (window.polidesk)
 ├── renderer/            interfaccia (HTML, CSS e JS senza framework)
 └── renderer-src/editor.js   sorgente del bundle dell'editor
 python/
@@ -82,51 +82,51 @@ python/
 ```
 
 Regole:
-- tutto ciò che non è interfaccia va in `crates/polirec-core`, esposto da un metodo di `polirecd`;
-- un nuovo canale dell'interfaccia è un metodo con lo stesso nome in `crates/polirecd/src/dispatch.rs` o `methods.rs`:
+- tutto ciò che non è interfaccia va in `crates/polidesk-core`, esposto da un metodo di `polideskd`;
+- un nuovo canale dell'interfaccia è un metodo con lo stesso nome in `crates/polideskd/src/dispatch.rs` o `methods.rs`:
   `src/main.js` lo inoltra da solo;
 - le funzioni per CLI e MCP stanno in `api.rs` e passano dai metodi `api:*`.
 
 ## Test con dati isolati
 
-Non usare mai la tua configurazione reale per le prove. `POLIREC_HOME` sposta tutti i dati dell'app in una cartella a scelta:
+Non usare mai la tua configurazione reale per le prove. `POLIDESK_HOME` sposta tutti i dati dell'app in una cartella a scelta:
 
 ```bash
-POLIREC_HOME=/tmp/polirec-test npm start
-POLIREC_HOME=/tmp/polirec-test npm run cli -- list    # ogni POLIREC_HOME ha il suo polirecd
+POLIDESK_HOME=/tmp/polidesk-test npm start
+POLIDESK_HOME=/tmp/polidesk-test npm run cli -- list    # ogni POLIDESK_HOME ha il suo polideskd
 ```
 
 ### Screenshot automatici (smoke test)
 
 ```bash
-POLIREC_HOME=/tmp/polirec-test \
-POLIREC_SMOKE=/tmp/shot.png \
-POLIREC_SMOKE_JS="(async()=>{ go({name:'rooms'}); await new Promise(r=>setTimeout(r,3000)) })()" \
+POLIDESK_HOME=/tmp/polidesk-test \
+POLIDESK_SMOKE=/tmp/shot.png \
+POLIDESK_SMOKE_JS="(async()=>{ go({name:'rooms'}); await new Promise(r=>setTimeout(r,3000)) })()" \
 npx electron .
 ```
 
-L'app si apre senza sincronizzare. Esegue il codice di `POLIREC_SMOKE_JS` nella pagina, salva lo screenshot ed esce.
+L'app si apre senza sincronizzare. Esegue il codice di `POLIDESK_SMOKE_JS` nella pagina, salva lo screenshot ed esce.
 Gli errori del renderer compaiono nel terminale come `[renderer] …`.
 
 ### Variabili d'ambiente
 
 | Variabile | Effetto |
 |---|---|
-| `POLIREC_HOME` | Cartella dei dati al posto di `~/.polirec` |
-| `POLIREC_CHROME` | Percorso di Chrome, se non viene trovato da solo |
-| `POLIREC_SHOW_BROWSER` | Chrome visibile invece che in background (come l'opzione «Mostra il browser») |
-| `POLIREC_NO_ARIA2` | Usa il downloader interno anche se `aria2c` è installato |
-| `POLIREC_SMOKE`, `POLIREC_SMOKE_JS` | Screenshot automatico (vedi sopra) |
-| `POLIREC_APP_ROOT`, `POLIREC_FFMPEG` | Cartella dell'app (script `python/`) e ffmpeg incluso; di solito le scrive l'app in `~/.polirec/runtime.json` |
-| `POLIRECD` | Percorso di `polirecd` da usare al posto di quello incluso |
+| `POLIDESK_HOME` | Cartella dei dati al posto di `~/.polidesk` |
+| `POLIDESK_CHROME` | Percorso di Chrome, se non viene trovato da solo |
+| `POLIDESK_SHOW_BROWSER` | Chrome visibile invece che in background (come l'opzione «Mostra il browser») |
+| `POLIDESK_NO_ARIA2` | Usa il downloader interno anche se `aria2c` è installato |
+| `POLIDESK_SMOKE`, `POLIDESK_SMOKE_JS` | Screenshot automatico (vedi sopra) |
+| `POLIDESK_APP_ROOT`, `POLIDESK_FFMPEG` | Cartella dell'app (script `python/`) e ffmpeg incluso; di solito le scrive l'app in `~/.polidesk/runtime.json` |
+| `POLIDESKD` | Percorso di `polideskd` da usare al posto di quello incluso |
 
-Test del backend: `cargo test`. Gli strumenti in `crates/polirec-core/examples/` confrontano parser dell'orario e pulizia delle trascrizioni con i file di prova.
+Test del backend: `cargo test`. Gli strumenti in `crates/polidesk-core/examples/` confrontano parser dell'orario e pulizia delle trascrizioni con i file di prova.
 
 ## Rilascio
 
-1. In `package.json` → `polirec` imposta:
+1. In `package.json` → `polidesk` imposta:
    - `donateUrl`: link «Buy me a coffee»;
-   - `repo`: `utente/polirec`, per il controllo degli aggiornamenti.
+   - `repo`: `utente/polidesk`, per il controllo degli aggiornamenti.
 
    Aggiungi anche `repository` e `build.publish`.
 2. `npm version minor && git push --tags`: il workflow `.github/workflows/build.yml` crea gli installer per macOS
@@ -140,7 +140,7 @@ Test del backend: `cargo test`. Gli strumenti in `crates/polirec-core/examples/`
 Le pagine sono in `docs/wiki/`. Per copiarle nella wiki della repository (va prima creata una pagina dal sito):
 
 ```bash
-scripts/publish-wiki.sh <utente>/polirec
+scripts/publish-wiki.sh <utente>/polidesk
 ```
 
 ## Licenza dei contributi

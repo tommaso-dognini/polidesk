@@ -14,7 +14,7 @@
 | **Note AI** | Tutte le note generate dall'AI per il corso |
 | **Impostazioni** | Nome, cartella, lingua, sync automatica, materiale, link extra, password video, **docenti seguiti** |
 
-**Lezioni parallele**: se un corso ha registrazioni di più docenti, PoliRec mostra *«Quale docente segui?»* e scarica solo quelle
+**Lezioni parallele**: se un corso ha registrazioni di più docenti, PoliDesk mostra *«Quale docente segui?»* e scarica solo quelle
 scelte (puoi selezionarne più di uno). La scelta si cambia in *Impostazioni del corso → Docenti seguiti*, con l'opzione di spostare
 nel Cestino i file dei docenti che togli. Nell'elenco lezioni il pulsante 👥 mostra o nasconde le lezioni degli altri docenti.
 
@@ -84,21 +84,21 @@ download (⬇ con percentuale), trascrizioni (🎙), AI (✨), elementi in pausa
 - **Registro**: tutto quello che è successo, anche a finestra chiusa, con filtri (problemi, sincronizzazione, download,
   trascrizioni, AI), ricerca e copia.
 
-Le operazioni continuano anche chiudendo la finestra: le esegue il motore di PoliRec (`polirecd`) in background.
+Le operazioni continuano anche chiudendo la finestra: le esegue il motore di PoliDesk (`polideskd`) in background.
 
 ## Login e browser
 
 La sincronizzazione usa Chrome **in background, senza finestre**. Quando il Politecnico (PoliMi, SPID, WebEx) chiede di
-accedere, si apre la finestra **«Accedi al Politecnico»** di PoliRec. Fai il login lì: la finestra si chiude da sola e
+accedere, si apre la finestra **«Accedi al Politecnico»** di PoliDesk. Fai il login lì: la finestra si chiude da sola e
 la sincronizzazione riprende. Se usi solo la riga di comando o un assistente AI, al suo posto si apre una piccola
 finestra di Chrome senza schede, solo per l'accesso. Per vedere Chrome mentre lavora (utile se qualcosa non va):
 *Impostazioni → Sincronizzazione → Mostra il browser*.
 
 ## Corsi su un disco esterno
 
-Se la cartella di un corso è su un disco esterno scollegato, PoliRec non mostra errori e non scrive altrove. Compare
+Se la cartella di un corso è su un disco esterno scollegato, PoliDesk non mostra errori e non scrive altrove. Compare
 **«Collega il disco»** con i corsi coinvolti, e la dashboard e la pagina del corso lo segnalano. Quando colleghi il
-disco, PoliRec se ne accorge in pochi secondi e risincronizza quei corsi da solo.
+disco, PoliDesk se ne accorge in pochi secondi e risincronizza quei corsi da solo.
 
 ## Impostazioni (principali)
 | Sezione | Cosa si regola |

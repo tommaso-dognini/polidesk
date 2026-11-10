@@ -1,6 +1,6 @@
-# Wiki di PoliRec
+# Wiki di PoliDesk
 
-PoliRec scarica, trascrive e organizza le lezioni registrate del Politecnico di Milano e ti aiuta a studiarle.
+PoliDesk scarica, trascrive e organizza le lezioni registrate del Politecnico di Milano e ti aiuta a studiarle.
 Questa wiki spiega come installarlo, come usarlo e come controllarlo da terminale o da un assistente AI.
 
 ## Per iniziare
@@ -9,8 +9,8 @@ Questa wiki spiega come installarlo, come usarlo e come controllarlo da terminal
 
 ## Comandi
 - **[Scorciatoie e command palette](Scorciatoie-e-command-palette.md)**: scorciatoie da tastiera e comandi rapidi (⇧⌘P).
-- **[Riga di comando](Riga-di-comando.md)**: la CLI `polirec` per script e automazioni.
-- **[Server MCP](Server-MCP.md)**: usare PoliRec da Claude Code, Claude Desktop o altri assistenti AI.
+- **[Riga di comando](Riga-di-comando.md)**: la CLI `polidesk` per script e automazioni.
+- **[Server MCP](Server-MCP.md)**: usare PoliDesk da Claude Code, Claude Desktop o altri assistenti AI.
 
 ## Per sviluppatori
 - **[Sviluppo](Sviluppo.md)**: avvio da sorgente, struttura del codice, test, build e rilascio.

@@ -1,6 +1,6 @@
-# Server MCP: PoliRec nel tuo assistente AI
+# Server MCP: PoliDesk nel tuo assistente AI
 
-PoliRec include un server [MCP](https://modelcontextprotocol.io) (Model Context Protocol). Con questo, Claude Code,
+PoliDesk include un server [MCP](https://modelcontextprotocol.io) (Model Context Protocol). Con questo, Claude Code,
 Claude Desktop o un altro assistente compatibile può leggere le tue lezioni, cercare nei contenuti, creare appunti e
 attività, controllare orario e aule libere, con le stesse funzioni dell'app.
 
@@ -14,11 +14,11 @@ attività, controllare orario e aule libere, con le stesse funzioni dell'app.
 Premi **«Aggiungi a Claude Code»**, oppure copia ed esegui il comando mostrato:
 
 ```bash
-claude mcp add polirec --scope user -- \
-  /Applications/PoliRec.app/Contents/Resources/bin/polirec mcp
+claude mcp add polidesk --scope user -- \
+  /Applications/PoliDesk.app/Contents/Resources/bin/polidesk mcp
 ```
 
-Verifica con `claude mcp list`. Per toglierlo: `claude mcp remove polirec --scope user`.
+Verifica con `claude mcp list`. Per toglierlo: `claude mcp remove polidesk --scope user`.
 
 ### Claude Desktop e altri client
 Premi **«Copia JSON»** e incollalo nella configurazione MCP del client.
@@ -27,8 +27,8 @@ Per Claude Desktop è `claude_desktop_config.json` (Impostazioni → Sviluppator
 ```json
 {
   "mcpServers": {
-    "polirec": {
-      "command": "/Applications/PoliRec.app/Contents/Resources/bin/polirec",
+    "polidesk": {
+      "command": "/Applications/PoliDesk.app/Contents/Resources/bin/polidesk",
       "args": ["mcp"]
     }
   }
@@ -36,7 +36,7 @@ Per Claude Desktop è `claude_desktop_config.json` (Impostazioni → Sviluppator
 ```
 
 I percorsi dipendono dal sistema e da dove hai installato l'app: usa quelli copiati dall'app.
-Dal codice sorgente: `cargo run -p polirec -- mcp` (oppure `npm run mcp`). Il server MCP è un client di `polirecd`: le operazioni lunghe (sincronizzazione, trascrizione) usano le stesse code dell'app.
+Dal codice sorgente: `cargo run -p polidesk -- mcp` (oppure `npm run mcp`). Il server MCP è un client di `polideskd`: le operazioni lunghe (sincronizzazione, trascrizione) usano le stesse code dell'app.
 
 ## Strumenti
 
@@ -47,7 +47,7 @@ Corsi e lezioni si indicano come nella CLI: per il corso nome anche parziale, nu
 
 | Strumento | Parametri | Cosa fa |
 |---|---|---|
-| `polirec_status` | — | Versione, corsi, strumenti AI e trascrizione |
+| `polidesk_status` | — | Versione, corsi, strumenti AI e trascrizione |
 | `list_courses` | — | Corsi con lezioni, scaricate, trascritte, docenti seguiti |
 | `list_lessons` | `course`, `include_other_teachers?` | Lezioni con sommario, argomenti, note AI disponibili |
 | `get_lesson` | `course`, `lesson` | Dettagli e appunti collegati |
@@ -66,7 +66,7 @@ Corsi e lezioni si indicano come nella CLI: per il corso nome anche parziale, nu
 
 | Strumento | Parametri | Cosa fa |
 |---|---|---|
-| `ask` | `question`, `course?` | Risposta con citazioni generata dallo strumento AI di PoliRec |
+| `ask` | `question`, `course?` | Risposta con citazioni generata dallo strumento AI di PoliDesk |
 | `generate_ai_note` | `course`, `lesson`, `kind` | Genera o rigenera una nota AI (1-2 minuti) |
 | `create_note` | `course?`, `title`, `kind?`, `content?`, `lessons?` | Crea un appunto, anche già collegato a delle lezioni |
 | `update_note` | `course?`, `file`, `content`, `mode?` (`replace`/`append`) | Modifica un appunto |

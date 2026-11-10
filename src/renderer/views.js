@@ -43,54 +43,184 @@ function askNewNote(defaultKind) {
 }
 window.noRerender = new Set(['notes']);
 
-// ═════════════ POMODORO (sidebar widget, state survives reloads) ═════════════
+// ═════════════ FOCUS (Pomodoro): pill in the top bar while a session is on, popover with the controls ═════════════
+// st.run = the settings of the session in progress (chosen in the "Nuova sessione" sheet); defaults in settings.pomodoro
+const FOCUS_PRESETS = [['classico', 'Classico', 25, 5, 15], ['lungo', 'Lungo', 50, 10, 20], ['profondo', 'Profondo', 90, 20, 30]];
+const today = () => new Date().toISOString().slice(0, 10);
 const Pomo = {
-    st: (() => { try { return JSON.parse(localStorage.getItem('pomo')) || null; } catch (e) { return null; } })() || { mode: 'focus', running: false, endsAt: 0, left: 0, count: 0, courseId: null, startedAt: null },
-    cfg() { return (S && S.settings.pomodoro) || { focus: 25, short: 5, long: 15, every: 4, sound: true }; },
-    dur(mode) { const c = this.cfg(); return (mode === 'focus' ? c.focus : mode === 'short' ? c.short : c.long) * 60000; },
-    save() { localStorage.setItem('pomo', JSON.stringify(this.st)); },
+    st: (() => { try { return JSON.parse(localStorage.getItem('pomo')) || null; } catch (e) { return null; } })() || {},
+    cfg() { return { focus: 25, short: 5, long: 15, every: 4, cycles: 4, autoBreak: true, autoFocus: false, sound: true, ...((S && S.settings.pomodoro) || {}) }; },
+    run() { return { ...this.cfg(), ...(this.st.run || {}) }; },
+    dur(mode) { const c = this.run(); return (mode === 'focus' ? c.focus : mode === 'short' ? c.short : c.long) * 60000 + (this.st.extra || 0); },
+    save() { try { localStorage.setItem('pomo', JSON.stringify(this.st)); } catch (e) { } },
     remaining() { return this.st.running ? Math.max(0, (this.st.endsAt || 0) - Date.now()) : (this.st.left > 0 ? this.st.left : this.dur(this.st.mode)); },
-    start() { if (this.st.running) return; const left = this.remaining(); this.st.endsAt = Date.now() + (left > 0 ? left : this.dur(this.st.mode)); this.st.running = true; this.st.startedAt = this.st.startedAt || new Date().toISOString(); this.save(); this.draw(); },
+    get active() { return !!this.st.active; },
+    /** begin a session (opts from the sheet; none = saved defaults) */
+    begin(opts = {}) {
+        const run = { ...this.cfg(), ...opts };
+        if (this.st.day !== today()) { this.st.day = today(); this.st.todayCount = 0; }
+        this.st = { ...this.st, active: true, run, mode: 'focus', done: 0, extra: 0, courseId: opts.courseId !== undefined ? opts.courseId : this.st.courseId || null, running: false, left: 0, startedAt: null };
+        delete this.st.run.courseId;
+        this.start();
+    },
+    start() {
+        if (!this.st.active) return this.begin();
+        if (this.st.running) return;
+        const left = this.remaining();
+        this.st.endsAt = Date.now() + left; this.st.running = true; this.st.startedAt = this.st.startedAt || new Date().toISOString();
+        this.save(); this.draw();
+    },
     pause() { this.st.left = this.remaining(); this.st.running = false; this.save(); this.draw(); },
-    reset(mode) { this.st = { ...this.st, mode: mode || this.st.mode, running: false, left: this.dur(mode || this.st.mode), startedAt: null }; this.save(); this.draw(); },
-    async finish() {
-        const was = this.st.mode;
-        const minutes = Math.round(this.dur(was) / 60000);
-        this.st.running = false;
+    toggle() { if (!this.st.active) this.begin(); else this.st.running ? this.pause() : this.start(); },
+    addMinutes(n) { this.st.extra = (this.st.extra || 0) + n * 60000; if (this.st.running) this.st.endsAt += n * 60000; else this.st.left = this.remaining() + n * 60000; this.save(); this.draw(); },
+    stop() { this.st = { day: this.st.day, todayCount: this.st.todayCount, courseId: this.st.courseId }; this.save(); this.draw(); closeFocusPop(); },
+    // compat: older callers
+    reset() { this.stop(); },
+    async finish(skipped) {
+        const was = this.st.mode, r = this.run();
+        if (this.st.day !== today()) { this.st.day = today(); this.st.todayCount = 0; }
+        this.st.running = false; this.st.extra = 0;
         if (was === 'focus') {
-            this.st.count++;
-            guard(() => api.ws.pomodoro(this.st.courseId, minutes, 'focus', this.st.startedAt));
-            const next = this.st.count % this.cfg().every === 0 ? 'long' : 'short';
-            this.notify('🍅 Sessione completata!', `Pausa ${next === 'long' ? 'lunga' : 'breve'} di ${Math.round(this.dur(next) / 60000)} minuti.`);
+            if (!skipped) {
+                const minutes = Math.round((Date.now() - new Date(this.st.startedAt || Date.now()).getTime()) / 60000) || r.focus;
+                guard(() => api.ws.pomodoro(this.st.courseId, Math.min(minutes, r.focus + 60), 'focus', this.st.startedAt));
+            }
+            this.st.done = (this.st.done || 0) + 1; this.st.todayCount = (this.st.todayCount || 0) + (skipped ? 0 : 1);
+            if (r.cycles > 0 && this.st.done >= r.cycles) {
+                this.notify('🎉 Sessione completata', `${this.st.done} ${this.st.done === 1 ? 'blocco' : 'blocchi'} di focus. Ottimo lavoro!`);
+                return this.stop();
+            }
+            const next = this.st.done % r.every === 0 ? 'long' : 'short';
+            if (!skipped) this.notify('Focus completato', `Pausa ${next === 'long' ? 'lunga' : 'breve'} di ${next === 'long' ? r.long : r.short} minuti.`);
             this.st.mode = next;
-        } else { this.notify('☕ Pausa finita', 'Si torna a studiare.'); this.st.mode = 'focus'; }
-        this.st.left = this.dur(this.st.mode); this.st.startedAt = null; this.save(); this.draw();
+        } else {
+            if (!skipped) this.notify('Pausa finita', 'Si torna a studiare.');
+            this.st.mode = 'focus';
+        }
+        this.st.left = this.dur(this.st.mode); this.st.startedAt = null;
+        this.save();
+        if (this.st.mode === 'focus' ? r.autoFocus : r.autoBreak) this.start(); else this.draw();
     },
     notify(title, body) {
-        try { new Notification(title, { body, silent: !this.cfg().sound }); } catch (e) { }
-        if (this.cfg().sound) { try { const a = new AudioContext(), o = a.createOscillator(), g = a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value = 880; g.gain.setValueAtTime(.15, a.currentTime); g.gain.exponentialRampToValueAtTime(.0001, a.currentTime + 1.2); o.start(); o.stop(a.currentTime + 1.2); } catch (e) { } }
-        toast(title + ' ' + body, 5000);
+        const r = this.run();
+        try { new Notification(title, { body, silent: !r.sound }); } catch (e) { }
+        if (r.sound) { try { const a = new AudioContext(); [0, .18].forEach((t, i) => { const o = a.createOscillator(), g = a.createGain(); o.connect(g); g.connect(a.destination); o.frequency.value = i ? 1320 : 880; g.gain.setValueAtTime(.12, a.currentTime + t); g.gain.exponentialRampToValueAtTime(.0001, a.currentTime + t + .9); o.start(a.currentTime + t); o.stop(a.currentTime + t + .9); }); } catch (e) { } }
+        toast(`${title} · ${body}`, 5000);
     },
+    label(mode = this.st.mode) { return { focus: 'Focus', short: 'Pausa', long: 'Pausa lunga' }[mode]; },
+    time(ms = this.remaining()) { const t = Math.ceil(ms / 1000), h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(s).padStart(2, '0'); },
+    /** top bar: a timer button when idle, the live pill while a session is on */
     draw() {
-        const el = $('#pomo'); if (!el || !S) return;
-        const r = this.remaining(), m = Math.floor(r / 60000), s = Math.floor(r % 60000 / 1000);
-        const label = { focus: 'Focus', short: 'Pausa', long: 'Pausa lunga' }[this.st.mode];
-        const pct = 100 - r / this.dur(this.st.mode) * 100;
-        const courses = S.courses.map(c => `<option value="${c.id}" ${this.st.courseId === c.id ? 'selected' : ''}>${esc(cname(c))}</option>`).join('');
-        el.innerHTML = `<div class="pomo-card ${this.st.mode} ${this.st.running ? 'running' : ''}">
-            <div class="pomo-row"><button class="icon ghost small" id="pomo-go" title="${this.st.running ? 'Pausa' : 'Avvia'} (⌘⇧T)" aria-label="${this.st.running ? 'Pausa' : 'Avvia'}">${icon(this.st.running ? 'pause' : 'play')}</button>
-                <span class="pomo-label">${label}${this.st.count ? ` <span class="faint" title="Sessioni completate">· ${this.st.count}</span>` : ''}</span><span class="grow"></span><span class="pomo-time">${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}</span></div>
-            <div class="progress"><i style="width:${pct}%"></i></div>
-            <div class="pomo-more"><select id="pomo-course" class="small-select" title="Corso a cui assegnare il tempo"><option value="">Generale</option>${courses}</select><button class="small ghost icon" id="pomo-reset" title="Azzera" aria-label="Azzera">${icon('reset')}</button><button class="small ghost icon" id="pomo-skip" title="Salta" aria-label="Salta">${icon('skip')}</button></div></div>`;
-        $('#pomo-go').onclick = () => this.st.running ? this.pause() : this.start();
-        $('#pomo-reset').onclick = () => this.reset();
-        $('#pomo-skip').onclick = () => this.finish();
-        $('#pomo-course').onchange = e => { this.st.courseId = e.target.value || null; this.save(); };
+        const slot = $('#focus-slot'); if (!slot || !S) return;
+        if (!this.active) {
+            slot.innerHTML = `<button class="tb-btn" id="focus-new" title="Focus · Pomodoro (⌘⇧T)" aria-label="Nuova sessione di focus">${icon('timer')}</button>`;
+            $('#focus-new').onclick = () => openFocusSheet();
+            return;
+        }
+        const r = this.remaining(), tot = this.dur(this.st.mode), pct = Math.max(0, Math.min(1, 1 - r / tot));
+        const c = this.st.courseId && course(this.st.courseId);
+        slot.innerHTML = `<button class="focus-pill ${this.st.mode} ${this.st.running ? 'running' : 'paused'}" id="focus-pill" title="${this.label()}${c ? ' · ' + esc(cname(c)) : ''} — clic per i controlli">
+            <svg class="ring" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8"/><circle class="v" cx="10" cy="10" r="8" style="stroke-dashoffset:${(50.27 * (1 - pct)).toFixed(2)}"/></svg>
+            <span class="fp-t">${this.time(r)}</span>${this.st.running ? '' : `<span class="fp-s">${icon('pause')}</span>`}</button>`;
+        $('#focus-pill').onclick = e => { e.stopPropagation(); toggleFocusPop(); };
+        drawFocusPop();
     },
 };
-if (Pomo.st.running && (!Pomo.st.endsAt || Pomo.st.endsAt < Date.now() - 60000)) { Pomo.st.running = false; Pomo.st.left = Pomo.dur(Pomo.st.mode); Pomo.save(); }
+if (Pomo.st.running && Pomo.st.endsAt && Pomo.st.endsAt < Date.now() - 5 * 60000) { Pomo.st.running = false; Pomo.st.left = Pomo.dur(Pomo.st.mode); Pomo.save(); }
 setInterval(() => { if (Pomo.st.running) { if (Pomo.remaining() <= 0) Pomo.finish(); else Pomo.draw(); } }, 1000);
 window.Pomo = Pomo;
+
+/** Popover under the pill (like a menu bar extra on macOS). */
+function toggleFocusPop() { if ($('#focus-pop')) closeFocusPop(); else { const p = document.createElement('div'); p.id = 'focus-pop'; p.className = 'focus-pop'; document.body.appendChild(p); drawFocusPop(); setTimeout(() => document.addEventListener('mousedown', focusPopOutside), 0); } }
+function closeFocusPop() { const p = $('#focus-pop'); if (p) p.remove(); document.removeEventListener('mousedown', focusPopOutside); }
+function focusPopOutside(e) { if (!e.target.closest('#focus-pop') && !e.target.closest('#focus-pill')) closeFocusPop(); }
+function drawFocusPop() {
+    const p = $('#focus-pop'); if (!p) return;
+    if (!Pomo.active) return closeFocusPop();
+    const st = Pomo.st, r = Pomo.run(), rem = Pomo.remaining(), tot = Pomo.dur(st.mode), pct = Math.max(0, Math.min(1, 1 - rem / tot));
+    const pill = $('#focus-pill'); if (pill) { const b = pill.getBoundingClientRect(); p.style.top = (b.bottom + 8) + 'px'; p.style.right = Math.max(10, innerWidth - b.right - 40) + 'px'; }
+    const n = r.cycles > 0 ? r.cycles : Math.max(r.every, (st.done || 0) + 1);
+    const dots = Array.from({ length: n }, (_, i) => `<i class="${i < (st.done || 0) ? 'on' : i === (st.done || 0) && st.mode === 'focus' ? 'cur' : ''}"></i>`).join('');
+    const courses = S.courses.map(c => `<option value="${c.id}" ${st.courseId === c.id ? 'selected' : ''}>${esc(cname(c))}</option>`).join('');
+    if (!p.dataset.built) {
+        p.dataset.built = '1';
+        p.innerHTML = `<div class="fpp-head"><span class="fpp-mode"></span><span class="grow"></span><span class="faint fpp-today"></span></div>
+            <div class="fpp-ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52"/><circle class="v" cx="60" cy="60" r="52"/></svg><div><b class="fpp-time"></b><span class="fpp-sub"></span></div></div>
+            <div class="fpp-dots"></div>
+            <div class="fpp-btns"><button class="primary" id="fp-go"></button><button id="fp-plus" title="Aggiungi 5 minuti">+5 min</button><button id="fp-skip" title="Passa alla fase successiva">${icon('skip')}</button></div>
+            <label class="fpp-course">${icon('book')}<select id="fp-course"><option value="">Nessun corso</option>${courses}</select></label>
+            <div class="fpp-foot"><button class="ghost small" id="fp-stop">Termina sessione</button><span class="grow"></span><button class="ghost small" id="fp-new">Nuova…</button></div>`;
+        $('#fp-go', p).onclick = () => Pomo.toggle();
+        $('#fp-plus', p).onclick = () => Pomo.addMinutes(5);
+        $('#fp-skip', p).onclick = () => Pomo.finish(true);
+        $('#fp-stop', p).onclick = () => Pomo.stop();
+        $('#fp-new', p).onclick = () => { closeFocusPop(); openFocusSheet(); };
+        $('#fp-course', p).onchange = e => { Pomo.st.courseId = e.target.value || null; Pomo.save(); Pomo.draw(); };
+    }
+    p.className = `focus-pop ${st.mode}`;
+    $('.fpp-mode', p).textContent = Pomo.label();
+    $('.fpp-today', p).textContent = st.todayCount ? `${st.todayCount} oggi` : '';
+    $('.fpp-time', p).textContent = Pomo.time(rem);
+    $('.fpp-sub', p).textContent = st.running ? `fino alle ${new Date(Date.now() + rem).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}` : 'in pausa';
+    $('.fpp-ring .v', p).style.strokeDashoffset = (326.73 * (1 - pct)).toFixed(1);
+    $('.fpp-dots', p).innerHTML = dots + `<span class="faint">${r.cycles > 0 ? `${st.done || 0} di ${r.cycles}` : `${st.done || 0} completati`}</span>`;
+    $('#fp-go', p).innerHTML = st.running ? `${icon('pause')} Pausa` : `${icon('play')} Riprendi`;
+}
+
+/** "Nuova sessione di focus": everything adjustable; the choice becomes the new default. */
+function openFocusSheet(courseId) {
+    const c = Pomo.cfg();
+    const preset = (FOCUS_PRESETS.find(p => p[2] === c.focus && p[3] === c.short && p[4] === c.long) || ['custom'])[0];
+    const num = (id, v, min, max, unit) => `<div class="stepper"><button data-d="-1" data-for="${id}">−</button><input id="${id}" type="number" min="${min}" max="${max}" value="${v}"><button data-d="1" data-for="${id}">+</button><span class="muted">${unit || ''}</span></div>`;
+    const cur = courseId !== undefined ? courseId : Pomo.st.courseId;
+    const m = modal(`<div class="focus-sheet">
+        <div class="fs-hero"><span class="ob-ic" style="background:linear-gradient(135deg,#ff6b4a,#ff2d55)">${icon('timer')}</span><div><h2>Nuova sessione di focus</h2><p class="muted">Blocchi di studio con pause in mezzo. Il timer resta in alto finché la sessione è attiva.</p></div></div>
+        <div class="seg fs-presets">${FOCUS_PRESETS.map(([k, l, f, s]) => `<button data-p="${k}" class="${preset === k ? 'on' : ''}">${l}<span>${f} / ${s}</span></button>`).join('')}<button data-p="custom" class="${preset === 'custom' ? 'on' : ''}">Personalizzato<span>a scelta</span></button></div>
+        <div class="gcard">
+            ${field('Focus', 'Durata di ogni blocco di studio', num('fs-f', c.focus, 1, 240, 'min'))}
+            ${field('Pausa breve', '', num('fs-s', c.short, 1, 60, 'min'))}
+            ${field('Pausa lunga', '', num('fs-l', c.long, 1, 90, 'min'))}
+            ${field('Pausa lunga ogni', '', num('fs-e', c.every, 2, 12, 'blocchi'))}
+        </div>
+        <div class="gcard">
+            ${field('Blocchi da fare', '0 = finché non la termini tu', num('fs-c', c.cycles, 0, 20, ''))}
+            ${field('Avvia le pause da solo', '', sw('fs-ab', c.autoBreak))}
+            ${field('Avvia il blocco successivo da solo', 'Altrimenti aspetta che premi Riprendi', sw('fs-af', c.autoFocus))}
+            ${field('Suono alla fine', '', sw('fs-snd', c.sound))}
+            ${field('Corso', 'Il tempo di studio viene registrato nel corso', `<select id="fs-course"><option value="">Nessun corso</option>${S.courses.map(x => `<option value="${x.id}" ${cur === x.id ? 'selected' : ''}>${esc(cname(x))}</option>`).join('')}</select>`)}
+        </div>
+        <p class="faint fs-total" id="fs-total"></p>
+        <div class="foot"><button class="ghost" id="fs-x">Annulla</button><button class="primary" id="fs-go">${icon('play')} Inizia</button></div></div>`);
+    const el = m.el, val = id => Math.max(+$('#' + id, el).min, Math.min(+$('#' + id, el).max, Math.round(+$('#' + id, el).value || 0)));
+    const total = () => {
+        const f = val('fs-f'), s = val('fs-s'), l = val('fs-l'), e = val('fs-e'), n = val('fs-c');
+        if (!n) return $('#fs-total', el).textContent = `Blocchi da ${f} minuti, senza limite`;
+        let t = 0; for (let i = 1; i <= n; i++) { t += f; if (i < n) t += i % e === 0 ? l : s; }
+        const end = new Date(Date.now() + t * 60000).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+        $('#fs-total', el).textContent = `${n} ${n === 1 ? 'blocco' : 'blocchi'} · ${Math.floor(t / 60) ? Math.floor(t / 60) + ' h ' : ''}${t % 60} min in tutto · fine verso le ${end}`;
+    };
+    $$('.fs-presets button', el).forEach(b => b.onclick = () => {
+        $$('.fs-presets button', el).forEach(x => x.classList.toggle('on', x === b));
+        const p = FOCUS_PRESETS.find(x => x[0] === b.dataset.p);
+        if (p) { $('#fs-f', el).value = p[2]; $('#fs-s', el).value = p[3]; $('#fs-l', el).value = p[4]; }
+        else $('#fs-f', el).focus();
+        total();
+    });
+    const markCustom = () => { const f = val('fs-f'), s = val('fs-s'), l = val('fs-l'); const p = FOCUS_PRESETS.find(x => x[2] === f && x[3] === s && x[4] === l); $$('.fs-presets button', el).forEach(x => x.classList.toggle('on', x.dataset.p === (p ? p[0] : 'custom'))); total(); };
+    $$('.stepper button', el).forEach(b => b.onclick = () => { const i = $('#' + b.dataset.for, el); i.value = Math.max(+i.min, Math.min(+i.max, (+i.value || 0) + +b.dataset.d * (b.dataset.for === 'fs-f' && +i.value >= 30 ? 5 : 1))); markCustom(); });
+    $$('.stepper input', el).forEach(i => i.oninput = markCustom);
+    total();
+    $('#fs-x', el).onclick = m.close;
+    $('#fs-go', el).onclick = () => guard(async () => {
+        const o = { focus: val('fs-f'), short: val('fs-s'), long: val('fs-l'), every: val('fs-e'), cycles: val('fs-c'), autoBreak: $('#fs-ab', el).checked, autoFocus: $('#fs-af', el).checked, sound: $('#fs-snd', el).checked };
+        await api.saveSettings({ pomodoro: { ...(S.settings.pomodoro || {}), ...o } });
+        await refresh();
+        m.close();
+        Pomo.begin({ ...o, courseId: $('#fs-course', el).value || null });
+        toast(`Focus di ${o.focus} minuti avviato`, 2500);
+    });
+}
+window.openFocusSheet = openFocusSheet;
 
 // ═════════════ APPUNTI (editor) ═════════════
 const Notes = { scope: null, file: null, kind: null, editor: null, dirty: false, saveT: null, aiOpen: true, dir: '', open: {} };
@@ -594,18 +724,20 @@ window.tabOverview = async (c, el) => {
         </div>
         <div class="ov-side">
             <div class="block"><div class="block-h"><b>Prossime lezioni</b></div>${next.map(e => `<div class="ev"><b>${new Date(e.start).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}</b> ${new Date(e.start).toTimeString().slice(0, 5)}<div class="faint">${esc((e.location || '').split('(')[0])}</div></div>`).join('') || '<p class="faint">Importa l\'orario dal Calendario.</p>'}</div>
+            <div class="block pn-block" id="ov-pn"></div>
             <div class="block"><div class="block-h"><b>Tempo di studio</b></div><div class="stats2"><div><b>${fmtMin(w.stats.today)}</b><span>oggi</span></div><div><b>${fmtMin(w.stats.week)}</b><span>7 giorni</span></div><div><b>${w.stats.sessions}</b><span>sessioni</span></div></div>
-                <button class="small ghost" id="ov-pomo">${icon('timer')} Avvia un Pomodoro</button></div>
+                <button class="small ghost" id="ov-pomo">${icon('timer')} Studia con il timer</button></div>
             <div class="block"><div class="block-h"><b>Appunti</b><span class="grow"></span><button class="small ghost icon" id="ov-newnote" title="Nuovo appunto" aria-label="Nuovo appunto">${icon('plus')}</button></div>${files.slice(0, 6).map(f => `<div class="lnk" data-note="${esc(f.file)}" data-k="${f.kind}"><span class="badge-k ${f.kind}">${{ markdown: 'MD', latex: 'TeX', typst: 'Typ' }[f.kind]}</span> ${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</div>`).join('') || '<p class="faint">Nessun appunto.</p>'}</div>
             <div class="block"><div class="block-h"><b>Materiale</b><span class="grow"></span><a data-tab="materiale">Tutto →</a></div>${mats.map(f => `<div class="lnk" data-mat="${esc(f)}"><span class="faint">${icon('file')}</span> ${esc(f.split('/').pop())}</div>`).join('') || '<p class="faint">Nessun file.</p>'}</div>
         </div></div>`;
+    if (window.PnUI) PnUI.overview(c, $('#ov-pn', el));
     wireTodos(el, () => window.tabOverview(c, el), c.id);
     $$('[data-tab]', el).forEach(a => a.onclick = () => go({ ...route, tab: a.dataset.tab }));
     $$('.mini', el).forEach(m => m.onclick = () => go({ name: 'recording', courseId: c.id, key: m.dataset.key, back: 'panoramica' }));
     $$('[data-mat]', el).forEach(a => a.onclick = () => guard(() => api.open(c.id, 'materials', a.dataset.mat)));
     $$('[data-note]', el).forEach(a => a.onclick = () => go({ name: 'notes', scope: c.id, file: a.dataset.note, kind: a.dataset.k }));
     $('#ov-newnote', el).onclick = () => go({ name: 'notes', scope: c.id });
-    $('#ov-pomo', el).onclick = () => { Pomo.st.courseId = c.id; Pomo.reset('focus'); Pomo.start(); };
+    $('#ov-pomo', el).onclick = () => openFocusSheet(c.id);
     let pageEd = null;
     $('#pg-edit', el).onclick = () => {
         if (pageEd) { // close
@@ -642,37 +774,45 @@ window.settingsExtra = async v => {
     const [clouds, apps, searchSt, assist] = await Promise.all([api.cloud.detect(), api.integrations.apps(), api.search.status(), api.assistant.info()]);
     const integ = (key, name, desc, detected) => field(name, desc + (detected === undefined || detected ? '' : ` <span class="pill warn">non rilevata su questo computer</span>`), sw('x-int-' + key, !!(s.integrations || {})[key]));
     const av = S.tools.ai, cur = s.ai.provider;
-    const providerWarn = av[cur] && av[cur].path ? '' : field('Strumento AI', '', `<span class="pill err">${esc((av[cur] || {}).label || cur)} non è installato su questo computer</span><span class="faint">${Object.values(av).some(x => x.path) ? 'verrà usato ' + esc(Object.values(av).find(x => x.path).label) : 'installa Antigravity CLI, Claude Code o Gemini CLI'}</span>`);
+    const providerWarn = av[cur] && av[cur].path ? '' : field('Strumento AI', '', `<span class="pill err">${esc((av[cur] || {}).label || cur)} non è installato su questo computer</span><span class="faint">${Object.values(av).some(x => x.path) ? 'verrà usato ' + esc(Object.values(av).find(x => x.path).label) : 'installa Antigravity CLI, Claude Code o GitHub Copilot CLI (vedi sopra)'}</span>`);
     const cl = s.cloud || {}, it = s.integrations || {};
     const box = $('#s-extra', v);
     box.innerHTML = `
-    <div class="group"><h3>Trascrizioni</h3>
+    <div class="group" data-pane="trascrizione"><h3>Motore e pulizia</h3>
         ${hw.hw.appleSilicon ? field('Motore', 'Whisper large-v3-turbo: più accurato, punteggiatura migliore. Parakeet (NVIDIA, lo stesso usato da Handy): ~2× più veloce, trascrive in modo letterale (le esitazioni vengono poi rimosse dalla pulizia).', `<div class="seg" id="x-eng"><button data-v="mlx" class="${s.transcription.engine !== 'parakeet' ? 'on' : ''}">Whisper</button><button data-v="parakeet" class="${s.transcription.engine === 'parakeet' ? 'on' : ''}">Parakeet</button></div>`) : ''}
         ${field('Pulizia automatica', 'Rimuove ehm, mmm, uh, balbettii e frasi inventate da Whisper nei silenzi. Gli originali restano in trascrizioni/.orig', sw('x-clean', s.transcription.clean !== false))}
     </div>
-    <div class="group"><h3>Appunti</h3>
+    <div class="group" data-pane="appunti"><h3>Appunti</h3>
         ${field('Formato predefinito', 'Per i nuovi appunti (puoi sempre crearne di altri tipi)', `<div class="seg" id="x-mode">${[['markdown', 'Markdown'], ['latex', 'LaTeX'], ['typst', 'Typst']].map(([k, l]) => `<button data-v="${k}" class="${(s.editor.mode || 'markdown') === k ? 'on' : ''}">${l}</button>`).join('')}</div>`)}
         ${field('Motore LaTeX', 'Tectonic (MIT): scarica i pacchetti TeX al primo uso', engines.tectonic ? `<span class="pill ok">${esc(engines.tectonic)}</span>` : '<button id="x-tex">Installa</button>')}
         ${field('Motore Typst', 'Typst (Apache-2.0)', engines.typst ? `<span class="pill ok">${esc(engines.typst)}</span>` : '<button id="x-typ">Installa</button>')}
-        ${field('Cartella appunti generali', 'Gli appunti dei corsi stanno in <cartella corso>/appunti', `<input id="x-nroot" value="${esc(s.notesRoot || '')}" placeholder="~/Documents/PoliRec Appunti"><button id="x-nroot-pick">Sfoglia…</button>`)}
+        ${field('Cartella appunti generali', 'Gli appunti dei corsi stanno in <cartella corso>/appunti', `<input id="x-nroot" value="${esc(s.notesRoot || '')}" placeholder="~/Documents/PoliDesk Appunti"><button id="x-nroot-pick">Sfoglia…</button>`)}
     </div>
-    <div class="group"><h3>Pomodoro</h3>
-        ${field('Durate (minuti)', 'Focus · pausa breve · pausa lunga', `<input id="x-pf" type="number" min="5" max="90" style="width:70px" value="${s.pomodoro.focus}"><input id="x-ps" type="number" min="1" max="30" style="width:70px" value="${s.pomodoro.short}"><input id="x-pl" type="number" min="5" max="60" style="width:70px" value="${s.pomodoro.long}">`)}
-        ${field('Pausa lunga ogni', 'sessioni', `<input id="x-pe" type="number" min="2" max="8" style="width:70px" value="${s.pomodoro.every}">`)}
-        ${field('Suono', '', sw('x-psnd', s.pomodoro.sound))}
+    <div class="group" data-pane="pomodoro"><h3>Impostazioni predefinite</h3>
+        <p class="pf-note">Valgono per le nuove sessioni: quando ne avvii una puoi cambiarle, e la scelta diventa la nuova predefinita.</p>
+        ${field('Focus', 'Durata di ogni blocco di studio', `<input id="x-pf" type="number" min="1" max="240" style="width:70px" value="${Pomo.cfg().focus}"><span class="muted">min</span>`)}
+        ${field('Pausa breve · lunga', '', `<input id="x-ps" type="number" min="1" max="60" style="width:70px" value="${Pomo.cfg().short}"><input id="x-pl" type="number" min="1" max="90" style="width:70px" value="${Pomo.cfg().long}"><span class="muted">min</span>`)}
+        ${field('Pausa lunga ogni', '', `<input id="x-pe" type="number" min="2" max="12" style="width:70px" value="${Pomo.cfg().every}"><span class="muted">blocchi</span>`)}
+        ${field('Blocchi per sessione', '0 = finché non la termini tu', `<input id="x-pc" type="number" min="0" max="20" style="width:70px" value="${Pomo.cfg().cycles}">`)}
     </div>
-    <div class="group"><h3>Sincronizzazione cloud</h3>
+    <div class="group" data-pane="pomodoro"><h3>Comportamento</h3>
+        ${field('Avvia le pause da solo', '', sw('x-pab', Pomo.cfg().autoBreak))}
+        ${field('Avvia il blocco successivo da solo', 'Altrimenti aspetta che premi Riprendi', sw('x-paf', Pomo.cfg().autoFocus))}
+        ${field('Suono alla fine', '', sw('x-psnd', Pomo.cfg().sound))}
+        ${field('Nuova sessione', 'Il timer compare in alto a destra finché la sessione è attiva · ⌘⇧T avvia o mette in pausa', '<button id="x-pnew">Inizia…</button>')}
+    </div>
+    <div class="group" data-pane="cloud"><h3>Sincronizzazione cloud</h3>
         ${field('Sincronizza appunti e impostazioni', 'Appunti, pagine dei corsi, attività, impostazioni ed elenco corsi vengono salvati in una cartella cloud e ritrovati sugli altri computer. Video, trascrizioni e materiale restano in locale.', sw('x-cl-on', cl.enabled))}
-        ${field('Cartella cloud', clouds.length ? 'Rilevate su questo computer' : 'Nessuna cartella cloud trovata: installa iCloud Drive o Google Drive per desktop, oppure scegli una cartella sincronizzata', `<select id="x-cl-where" style="width:auto">${clouds.map(c => `<option value="${esc(c.path)}" data-p="${c.id}" ${cl.path === c.path ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__custom" ${cl.path && !clouds.some(c => c.path === cl.path) ? 'selected' : ''}>Altra cartella…</option></select><span class="faint" id="x-cl-path">${esc(cl.path ? cl.path + '/PoliRec' : '')}</span>`)}
+        ${field('Cartella cloud', clouds.length ? 'Rilevate su questo computer' : 'Nessuna cartella cloud trovata: installa iCloud Drive o Google Drive per desktop, oppure scegli una cartella sincronizzata', `<select id="x-cl-where" style="width:auto">${clouds.map(c => `<option value="${esc(c.path)}" data-p="${c.id}" ${cl.path === c.path ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}<option value="__custom" ${cl.path && !clouds.some(c => c.path === cl.path) ? 'selected' : ''}>Altra cartella…</option></select><span class="faint" id="x-cl-path">${esc(cl.path ? cl.path + '/PoliDesk' : '')}</span>`)}
         ${cl.enabled ? field('Stato', '', `<span class="pill ok">☁ attiva</span><span class="faint">${cl.lastPushed ? 'ultimo invio ' + new Date(cl.lastPushed).toLocaleString('it-IT') : ''}</span><span class="grow"></span><button id="x-cl-pull">Aggiorna ora</button>`) : ''}
     </div>
-    <div class="group"><h3>AI</h3>
+    <div class="group" data-pane="ai"><h3>Ricerca e pagine dei corsi</h3>
         ${field('Descrizione del corso automatica', 'La «Pagina del corso» viene scritta e aggiornata dall\'AI dai sommari delle lezioni (finché non la modifichi tu)', sw('x-ai-page', s.ai.autoCoursePage !== false))}
         ${field('Ricerca semantica', 'Cerca per significato in lezioni, appunti e slide (anche tra lingue diverse). Tutto in locale.', `<span class="pill ${searchSt.ready ? 'ok' : 'warn'}">${searchSt.ready ? Object.values(searchSt.counts).reduce((a, b) => a + b, 0) + ' frammenti indicizzati' : 'non installata'}</span><span class="grow"></span>${searchSt.ready ? '<button id="x-idx">Aggiorna indice</button>' : '<button class="primary" id="x-sinst">Installa (~250 MB)</button>'}`)}
         ${providerWarn}
     </div>
-    <div class="group"><h3>Integrazioni</h3>
-        <p class="muted" style="margin:4px 18px 8px">Attiva le app in cui vuoi esportare gli appunti: compariranno nel menu «Esporta» di ogni appunto. L'esportazione in PDF è sempre disponibile.</p>
+    <div class="group" data-pane="appunti"><h3>Esporta in altre app</h3>
+        <p class="pf-note">Attiva le app in cui vuoi esportare gli appunti: compariranno nel menu «Esporta» di ogni appunto. L'esportazione in PDF è sempre disponibile.</p>
         ${integ('notion', 'Notion', 'Crea una pagina Notion per ogni appunto esportato (titoli, liste, checklist, formule, codice).', true)}
         <div id="x-notion-cfg" class="${it.notion ? '' : 'hidden'}">
             ${field('Token di integrazione', 'notion.so/my-integrations → Nuova integrazione → copia il «Internal Integration Secret»', `<input id="x-nt" type="password" placeholder="ntn_… / secret_…" value="${esc(it.notionToken || '')}">`)}
@@ -683,18 +823,18 @@ window.settingsExtra = async v => {
         ${integ('notability', 'Notability', 'Esporta il PDF e lo apre in Notability.', apps.notability)}
         ${integ('obsidian', 'Obsidian', 'Apre l\'appunto in Obsidian. Usa come vault la cartella degli appunti (o la cartella cloud).', apps.obsidian)}
     </div>
-    <div class="group"><h3>Assistenti AI e automazioni</h3>
-        ${field('Assistenti AI (MCP)', 'Permette a Claude Code, Claude Desktop o altri assistenti compatibili MCP di usare PoliRec: leggere lezioni, trascrizioni e note, cercare, creare appunti e attività, vedere orario e aule libere.', sw('x-mcp', !!it.assistant))}
+    <div class="group" data-pane="ai"><h3>Assistenti AI e automazioni</h3>
+        ${field('Assistenti AI (MCP)', 'Permette a Claude Code, Claude Desktop o altri assistenti compatibili MCP di usare PoliDesk: leggere lezioni, trascrizioni e note, cercare, creare appunti e attività, vedere orario e aule libere.', sw('x-mcp', !!it.assistant))}
         <div id="x-mcp-cfg" class="${it.assistant ? '' : 'hidden'}">
-            ${field('Claude Code', assist.claudeInstalled ? 'Registra PoliRec come server MCP per tutti i tuoi progetti' : 'Esegui il comando nel terminale dopo aver installato Claude Code', `${assist.claudeInstalled ? '<button class="primary" id="x-mcp-add">Aggiungi a Claude Code</button>' : ''}<button id="x-mcp-cc">⧉ Copia comando</button>`)}
+            ${field('Claude Code', assist.claudeInstalled ? 'Registra PoliDesk come server MCP per tutti i tuoi progetti' : 'Esegui il comando nel terminale dopo aver installato Claude Code', `${assist.claudeInstalled ? '<button class="primary" id="x-mcp-add">Aggiungi a Claude Code</button>' : ''}<button id="x-mcp-cc">⧉ Copia comando</button>`)}
             ${field('Claude Desktop e altri', 'Incolla in claude_desktop_config.json (o nella configurazione MCP del tuo assistente)', '<button id="x-mcp-json">⧉ Copia JSON</button>')}
-            ${field('Riga di comando', 'Per i tuoi script: polirec lessons, transcript, search, ask, notes, todo, rooms… (--json per l\'output strutturato)', '<button id="x-cli">⧉ Copia alias</button>')}
+            ${field('Riga di comando', 'Per i tuoi script: polidesk lessons, transcript, search, ask, notes, todo, rooms… (--json per l\'output strutturato)', '<button id="x-cli">⧉ Copia alias</button>')}
             <pre class="mcp-snip">${esc(assist.claudeCode)}</pre>
         </div>
     </div>
-    <div class="group"><h3>Informazioni</h3>
+    <div class="group" data-pane="info"><h3>Informazioni</h3>
         ${field(`${esc(about.name)} ${esc(about.version)}`, `Electron ${esc(about.electron)} · ${esc(about.platform)} · dati in ${esc(about.dataDir)}`, '<button id="x-upd">Controlla aggiornamenti</button>')}
-        ${field('Gratis e open source', 'PoliRec è gratuito per tutti gli studenti. Se ti è utile, puoi offrire un caffè allo sviluppatore ☕', about.donateUrl ? '<button class="primary" id="x-coffee">☕ Buy me a coffee</button>' : '<span class="faint">link donazioni non configurato</span>')}
+        ${field('Gratis e open source', 'PoliDesk è gratuito per tutti gli studenti. Se ti è utile, puoi offrire un caffè allo sviluppatore ☕', about.donateUrl ? '<button class="primary" id="x-coffee">☕ Buy me a coffee</button>' : '<span class="faint">link donazioni non configurato</span>')}
         ${field('Licenze e crediti', 'Software libero GPL-3.0-or-later · progetti della community PoliNetwork e componenti di terze parti', '<button id="x-notice">Mostra</button>')}
         ${field('Avviso', 'App non ufficiale, non affiliata né approvata dal Politecnico di Milano. Usa le registrazioni solo per studio personale, nel rispetto del regolamento di Ateneo e del diritto d\'autore dei docenti.', '')}
     </div>`;
@@ -714,7 +854,7 @@ window.settingsExtra = async v => {
     $('#x-cl-on', box).onchange = e => guard(async () => {
         if (!e.target.checked) return applyCloud(false, cl.path);
         const p = await pickCloudPath(); if (!p) { e.target.checked = false; return; }
-        if (!confirm(`Attivare la sincronizzazione in:\n${p}/PoliRec ?\n\nGli appunti esistenti vengono copiati (gli originali restano dove sono).`)) { e.target.checked = false; return; }
+        if (!confirm(`Attivare la sincronizzazione in:\n${p}/PoliDesk ?\n\nGli appunti esistenti vengono copiati (gli originali restano dove sono).`)) { e.target.checked = false; return; }
         await applyCloud(true, p);
     });
     $('#x-cl-where', box).onchange = () => guard(async () => { if (!cl.enabled) return; const p = await pickCloudPath(); if (p) await applyCloud(true, p); });
@@ -730,7 +870,7 @@ window.settingsExtra = async v => {
     cp('#x-mcp-cc', assist.claudeCode, 'Comando copiato: incollalo nel terminale');
     cp('#x-mcp-json', assist.json, 'Configurazione JSON copiata');
     cp('#x-cli', assist.cli, 'Alias copiato: aggiungilo a ~/.zshrc o ~/.bashrc');
-    if ($('#x-mcp-add', box)) $('#x-mcp-add', box).onclick = () => guard(async () => { await api.assistant.addClaude(); toast('PoliRec aggiunto a Claude Code ✓ — prova a chiedere «quali lezioni ho questa settimana?»', 6000); });
+    if ($('#x-mcp-add', box)) $('#x-mcp-add', box).onclick = () => guard(async () => { await api.assistant.addClaude(); toast('PoliDesk aggiunto a Claude Code ✓ — prova a chiedere «quali lezioni ho questa settimana?»', 6000); });
     // AI
     $('#x-ai-page', box).onchange = e => saveX({ ai: { ...S.settings.ai, autoCoursePage: e.target.checked } });
     if ($('#x-idx', box)) $('#x-idx', box).onclick = () => guard(async () => { $('#x-idx', box).disabled = true; $('#x-idx', box).textContent = 'Indicizzo…'; await api.search.index(); toast('Indice aggiornato'); window.settingsExtra(v); });
@@ -747,11 +887,13 @@ window.settingsExtra = async v => {
     inst('#x-tex', 'tectonic'); inst('#x-typ', 'typst');
     $('#x-nroot-pick', box).onclick = async () => { const d = await api.pickDir($('#x-nroot', box).value); if (d) { $('#x-nroot', box).value = d; saveX({ notesRoot: d }); } };
     $('#x-nroot', box).onchange = e => saveX({ notesRoot: e.target.value });
-    const pomo = () => saveX({ pomodoro: { focus: +$('#x-pf', box).value || 25, short: +$('#x-ps', box).value || 5, long: +$('#x-pl', box).value || 15, every: +$('#x-pe', box).value || 4, sound: $('#x-psnd', box).checked } });
-    ['#x-pf', '#x-ps', '#x-pl', '#x-pe', '#x-psnd'].forEach(id => $(id, box).onchange = pomo);
+    const pomo = () => saveX({ pomodoro: { ...(S.settings.pomodoro || {}), focus: +$('#x-pf', box).value || 25, short: +$('#x-ps', box).value || 5, long: +$('#x-pl', box).value || 15, every: +$('#x-pe', box).value || 4, cycles: Math.max(0, +$('#x-pc', box).value || 0), autoBreak: $('#x-pab', box).checked, autoFocus: $('#x-paf', box).checked, sound: $('#x-psnd', box).checked } });
+    ['#x-pf', '#x-ps', '#x-pl', '#x-pe', '#x-pc', '#x-pab', '#x-paf', '#x-psnd'].forEach(id => $(id, box).onchange = pomo);
+    $('#x-pnew', box).onclick = () => openFocusSheet();
     if ($('#x-coffee', box)) $('#x-coffee', box).onclick = () => api.openExternal(about.donateUrl);
     $('#x-upd', box).onclick = () => guard(async () => { const u = await api.checkUpdate(); if (u) { if (confirm(`È disponibile la versione ${u.version}. Aprire la pagina di download?`)) api.openExternal(u.url); } else toast(about.repo ? 'Hai l\'ultima versione' : 'Repository per gli aggiornamenti non configurato'); });
     $('#x-notice', box).onclick = () => guard(async () => { const t = await api.notice(); const m = document.createElement('div'); $('#modal-root').innerHTML = `<div class="modal-bg"><div class="modal wide"><div class="md">${PoliEditor.renderMarkdown(t)}</div><div class="foot"><button class="primary" id="nt-x">Chiudi</button></div></div></div>`; $('#nt-x').onclick = () => $('#modal-root').innerHTML = ''; });
+    if (typeof prefsLayout === 'function') prefsLayout(v);
 };
 
 // donate link in the sidebar + update banner (once per start)
