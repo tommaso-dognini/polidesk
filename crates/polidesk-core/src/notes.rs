@@ -25,6 +25,32 @@ pub fn kind_by_ext(name: &str) -> Option<&'static str> {
         _ => None,
     }
 }
+/// Files the student uploads among the notes (handwritten scans, PDFs, slides…): not edited in the app.
+/// Returns the type shown in the UI, or None for files that are never listed (LaTeX byproducts…).
+pub fn file_type(name: &str) -> Option<&'static str> {
+    let ext = Path::new(name).extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();
+    Some(match ext.as_str() {
+        "pdf" => "pdf",
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "heic" | "heif" | "svg" | "bmp" | "tif" | "tiff" => "image",
+        "doc" | "docx" | "odt" | "rtf" | "pages" => "doc",
+        "ppt" | "pptx" | "odp" | "key" => "slides",
+        "xls" | "xlsx" | "ods" | "numbers" | "csv" => "sheet",
+        "txt" | "text" | "rst" | "org" => "text",
+        "ipynb" | "py" | "m" | "c" | "cpp" | "h" | "java" | "js" | "ts" | "rs" | "r" | "jl" | "sql" | "json" | "xml" | "html" | "css" => "code",
+        "goodnotes" | "note" | "notability" | "xopp" | "one" => "handwritten",
+        "zip" | "rar" | "7z" | "tar" | "gz" => "archive",
+        "mp3" | "m4a" | "wav" | "aac" | "ogg" | "flac" => "audio",
+        "mp4" | "mov" | "mkv" | "webm" | "avi" => "video",
+        "aux" | "log" | "out" | "toc" | "synctex" | "fls" | "fdb_latexmk" | "bbl" | "blg" | "ds_store" | "tmp" | "part" | "crdownload" => return None,
+        "" => return None,
+        _ => "other",
+    })
+}
+/// Types whose text can be read directly (search, AI).
+pub fn is_text_type(t: &str) -> bool {
+    matches!(t, "text" | "code")
+}
+
 fn template(kind: &str, t: &str) -> String {
     match kind {
         "latex" => format!("\\documentclass[11pt,a4paper]{{article}}\n\\usepackage[utf8]{{inputenc}}\n\\usepackage[italian,english]{{babel}}\n\\usepackage{{amsmath,amssymb,amsthm}}\n\\usepackage{{graphicx}}\n\\usepackage[margin=2.2cm]{{geometry}}\n\\usepackage{{hyperref}}\n\n\\title{{{t}}}\n\\author{{}}\n\\date{{\\today}}\n\n\\begin{{document}}\n\\maketitle\n\n\\section{{Introduzione}}\n\nScrivi qui. Formula: $E = mc^2$\n\n\\end{{document}}\n"),
@@ -48,12 +74,22 @@ pub fn list(dir: &Path) -> Vec<Value> {
             let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
             let p = e.path();
             if p.is_dir() {
-                walk(&p, &r, out);
+                // images pasted into notes live in assets/: they belong to their note, not to the list
+                if name != "assets" {
+                    walk(&p, &r, out);
+                }
             } else if let Some(kind) = kind_by_ext(&name) {
                 let Ok(st) = std::fs::metadata(&p) else { continue };
                 let pdf = p.with_extension("pdf");
                 let pdf_rel = Path::new(&r).with_extension("pdf").to_string_lossy().replace('\\', "/");
                 out.push(json!({ "file": r, "kind": kind, "mtime": util::mtime_ms(&st), "size": st.len(), "pdf": if pdf.exists() { json!(pdf_rel) } else { Value::Null } }));
+            } else if let Some(t) = file_type(&name) {
+                // the PDF compiled from a .tex / .typ note is shown with its note
+                if t == "pdf" && ["tex", "typ"].iter().any(|x| p.with_extension(x).exists()) {
+                    continue;
+                }
+                let Ok(st) = std::fs::metadata(&p) else { continue };
+                out.push(json!({ "file": r, "kind": "file", "type": t, "mtime": util::mtime_ms(&st), "size": st.len() }));
             }
         }
     }
@@ -135,6 +171,36 @@ pub fn remove(dir: &Path, rel: &str) -> Result<bool> {
     move_links(dir, rel, None)?;
     Ok(true)
 }
+/// Copy a file of the student (PDF, photos of handwritten notes, slides…) into the notes folder.
+/// Keeps its name; "name 2.pdf"… when taken. Returns the path relative to `dir`.
+pub fn import(dir: &Path, src: &Path, sub: Option<&str>) -> Result<String> {
+    let meta = std::fs::metadata(src).map_err(|e| anyhow!("{}: {e}", src.display()))?;
+    if !meta.is_file() {
+        bail!("{} non è un file", src.display());
+    }
+    let name = src.file_name().map(|n| n.to_string_lossy().into_owned()).ok_or_else(|| anyhow!("nome del file non valido"))?;
+    let base = match sub.map(clean_name).filter(|s| !s.is_empty()) {
+        Some(s) => dir.join(s),
+        None => dir.to_path_buf(),
+    };
+    std::fs::create_dir_all(&base)?;
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (clean_name(s), format!(".{e}")),
+        _ => (clean_name(&name), String::new()),
+    };
+    let mut dest = base.join(format!("{stem}{ext}"));
+    let mut i = 2;
+    while dest.exists() {
+        dest = base.join(format!("{stem} {i}{ext}"));
+        i += 1;
+    }
+    // hidden while copying (dotfiles are not listed), so a half-copied file never shows up
+    let tmp = dest.with_file_name(format!(".{}.part", dest.file_name().unwrap_or_default().to_string_lossy()));
+    std::fs::copy(src, &tmp)?;
+    std::fs::rename(&tmp, &dest)?;
+    Ok(util::rel_slash(dir, &dest))
+}
+
 /// Save a pasted/dropped image next to the note (assets/) and return its relative path.
 pub fn save_asset(dir: &Path, rel: &str, name: &str, data: &[u8]) -> Result<String> {
     let assets = safe(dir, rel)?.parent().ok_or_else(|| anyhow!("percorso non valido"))?.join("assets");

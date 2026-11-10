@@ -190,8 +190,17 @@ pub fn course_chunks(settings: &Value, c: &Value) -> Vec<Value> {
     let ndir = notes::dir_for(&data_dir);
     for f in notes::list(&ndir) {
         let file = util::s(&f, "file");
+        let meta = json!({ "type": "note", "course": id, "courseName": cname, "file": file, "kind": f["kind"], "title": strip_note_ext(file) });
+        // uploaded PDFs: text extracted in python, like the course material
+        if util::s(&f, "type") == "pdf" {
+            out.push(json!({ "pdf": ndir.join(file), "meta": meta }));
+            continue;
+        }
+        if util::s(&f, "kind") == "file" && !notes::is_text_type(util::s(&f, "type")) {
+            continue;
+        }
         for p in paragraphs(&safe_read(&ndir.join(file))) {
-            out.push(json!({ "text": p, "meta": { "type": "note", "course": id, "courseName": cname, "file": file, "kind": f["kind"], "title": strip_note_ext(file) } }));
+            out.push(json!({ "text": p, "meta": meta.clone() }));
         }
     }
     let page = workspace::load(Some(&data_dir))["page"].as_str().unwrap_or("").to_string();
@@ -213,8 +222,16 @@ fn general_chunks(settings: &Value) -> Vec<Value> {
     let mut out = vec![];
     for f in notes::list(&dir) {
         let file = util::s(&f, "file");
+        let meta = json!({ "type": "note", "course": null, "courseName": "Generale", "file": file, "kind": f["kind"], "title": strip_note_ext(file) });
+        if util::s(&f, "type") == "pdf" {
+            out.push(json!({ "pdf": dir.join(file), "meta": meta }));
+            continue;
+        }
+        if util::s(&f, "kind") == "file" && !notes::is_text_type(util::s(&f, "type")) {
+            continue;
+        }
         for p in paragraphs(&safe_read(&dir.join(file))) {
-            out.push(json!({ "text": p, "meta": { "type": "note", "course": null, "courseName": "Generale", "file": file, "kind": f["kind"], "title": strip_note_ext(file) } }));
+            out.push(json!({ "text": p, "meta": meta.clone() }));
         }
     }
     out

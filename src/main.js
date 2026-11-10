@@ -134,6 +134,14 @@ handle('pick-dir', async def => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], defaultPath: def || st.settings.defaultRoot || undefined });
     return r.canceled ? null : r.filePaths[0];
 });
+// files to upload among the notes (PDF, photos of handwritten notes, slides…)
+handle('pick-files', async () => {
+    const r = await dialog.showOpenDialog(win, {
+        title: 'Carica appunti', buttonLabel: 'Carica', properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Appunti e documenti', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'heic', 'webp', 'gif', 'doc', 'docx', 'odt', 'rtf', 'pages', 'ppt', 'pptx', 'key', 'odp', 'xls', 'xlsx', 'numbers', 'csv', 'txt', 'md', 'tex', 'typ', 'ipynb', 'zip', 'goodnotes', 'note'] }, { name: 'Tutti i file', extensions: ['*'] }],
+    });
+    return r.canceled ? [] : r.filePaths;
+});
 handle('appearance', async a => { nativeTheme.themeSource = a === 'light' ? 'light' : a === 'dark' ? 'dark' : 'system'; return true; });
 handle('clipboard:write', async text => { clipboard.writeText(String(text || '')); return true; });
 handle('open-external', async url => { if (/^https?:\/\//.test(url)) await shell.openExternal(url); return true; });

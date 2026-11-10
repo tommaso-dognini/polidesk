@@ -1187,3 +1187,30 @@ code.ai-cmd { font-size: .82em; padding: 4px 8px; border-radius: 6px; background
 .stepper button:first-child { border-radius: 7px 0 0 7px; } .stepper button[data-d="1"] { border-radius: 0 7px 7px 0; }
 .stepper .muted { margin-left: 8px; font-size: .9em; min-width: 46px; }
 .fs-total { margin: -4px 4px 0; font-size: .85em; }
+
+/* ═════════ appunti caricati (PDF, foto, documenti…) ═════════ */
+.badge-k.file { color: var(--fc); background: color-mix(in srgb, var(--fc) 13%, transparent); min-width: 26px; text-align: center; display: inline-block; }
+.badge-k.big { font-size: 1.1em; padding: 10px 12px; border-radius: 10px; }
+.n-ext { color: var(--faint); font-size: .85em; }
+.up-sheet { display: grid; gap: 14px; }
+.up-drop { border: 1.5px dashed var(--line-strong); border-radius: 14px; padding: 26px 16px; display: grid; justify-items: center; gap: 4px; text-align: center; cursor: pointer; background: color-mix(in srgb, var(--bg) 50%, var(--panel)); transition: background .12s, border-color .12s; outline: none; }
+.up-drop:hover, .up-drop:focus-visible { border-color: var(--accent); }
+.up-drop a { color: var(--accent); cursor: pointer; }
+.up-ico { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); margin-bottom: 6px; }
+.up-ico .i { width: 22px; height: 22px; }
+.drop-on { outline: 2px dashed var(--accent) !important; outline-offset: -4px; background: var(--accent-soft) !important; border-radius: 12px; }
+.up-drop.drop-on { outline: none !important; border-color: var(--accent); }
+.up-list { max-height: 240px; overflow: auto; }
+.up-file > label { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.up-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.up-file .ctl { flex-wrap: nowrap !important; }
+.up-file .pill .i { width: 11px; height: 11px; vertical-align: -1px; }
+.ln-drop .up-ico { margin: 0 auto 4px; }
+.fv-body { flex: 1; min-height: 0; display: flex; }
+.fv-body .pdf-frame { flex: 1; width: 100%; height: 100%; border: 0; }
+.fv-img { flex: 1; display: grid; place-items: center; padding: 20px; overflow: auto; background: color-mix(in srgb, var(--bg) 60%, var(--panel)); }
+.fv-img img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: var(--shadow); }
+.fv-text { flex: 1; margin: 0; padding: 18px 22px; overflow: auto; font: .85em/1.55 var(--font-mono); white-space: pre-wrap; }
+.fv-empty { flex: 1; align-content: center; justify-items: center; display: grid; gap: 8px; }
+.fv-empty h2 { margin: 8px 0 0; font-size: 1.2em; }
+.ln-actions { flex-wrap: wrap; }

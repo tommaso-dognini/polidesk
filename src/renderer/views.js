@@ -239,7 +239,7 @@ window.extraViews.notes = async v => {
     if (route.scope !== undefined) Notes.scope = route.scope;
     v.innerHTML = `<div class="notes-layout">
         <aside class="notes-side">
-            <div class="ns-head"><b>Appunti</b><span class="grow"></span><button class="primary small" id="n-new" title="Nuovo appunto (⌘N)">＋ Nuovo</button><button class="ghost small icon" id="n-hide" title="Nascondi elenco (⌘⇧E)">⇤</button></div>
+            <div class="ns-head"><b>Appunti</b><span class="grow"></span><button class="small" id="n-up" title="Carica PDF, foto, documenti…">${icon('download')} Carica</button><button class="primary small" id="n-new" title="Nuovo appunto (⌘N)">＋ Nuovo</button><button class="ghost small icon" id="n-hide" title="Nascondi elenco (⌘⇧E)">⇤</button></div>
             <div class="ns-search"><input id="n-filter" placeholder="Cerca negli appunti…"></div>
             <div id="n-tree" class="n-tree"></div>
             <div class="ns-foot"><button class="ghost small" id="n-folder">⌂ Apri cartella</button><span class="faint" id="n-cloud"></span></div>
@@ -266,13 +266,15 @@ window.extraViews.notes = async v => {
             return `<div class="n-group ${open ? 'open' : ''}" data-s="${esc(key)}">
                 <div class="n-gh"><span class="chev">▸</span><span class="n">${esc(s.name)}</span><span class="faint">${files.length || ''}</span><button class="icon ghost small n-add" title="Nuovo appunto in ${esc(s.name)}">＋</button></div>
                 <div class="n-gb">${files.map(f => `<div class="n-file ${Notes.file === f.file && String(Notes.scope || '') === key ? 'on' : ''}" data-f="${esc(f.file)}" data-k="${f.kind}">
-                    <span class="badge-k ${f.kind}">${KIND_SHORT[f.kind]}</span><span class="n">${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</span><span class="faint">${new Date(f.mtime).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span></div>`).join('') || '<div class="faint n-empty">vuoto</div>'}</div></div>`;
+                    ${noteBadge(f)}<span class="n">${noteName(f)}</span><span class="faint">${new Date(f.mtime).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}</span></div>`).join('') || '<div class="faint n-empty">vuoto</div>'}</div></div>`;
         }).join('');
         $$('.n-group').forEach(g => {
             const key = g.dataset.s;
             $('.n-gh', g).onclick = e => { if (e.target.closest('.n-add')) return; Notes.open[key] = !g.classList.contains('open'); g.classList.toggle('open'); };
             $('.n-add', g).onclick = () => create(key || null);
             $$('.n-file', g).forEach(x => x.onclick = () => openNote(x.dataset.f, x.dataset.k, key || null));
+            // drop files on a course group: upload them to that course
+            Upload.zone(g, files => Upload.open({ courseId: key || null, files }));
         });
     };
     Notes.reload = loadFiles;
@@ -285,6 +287,7 @@ window.extraViews.notes = async v => {
     });
     Notes.create = create;
     $('#n-new').onclick = () => create(Notes.scope);
+    $('#n-up').onclick = () => Upload.open({ courseId: Notes.scope || null });
     $('#n-filter').oninput = loadFiles;
     $('#n-folder').onclick = () => guard(async () => api.openPath(await api.notes.dir(Notes.scope)));
     await loadFiles();
@@ -357,6 +360,7 @@ async function flush() {
 window.flushNote = flush;
 
 async function openNote(file, kind, scope = Notes.scope) {
+    if (kind === 'file') return openFileNote(file, scope);
     await flush();
     if (Notes.editor) { Notes.editor.destroy(); Notes.editor = null; }
     Notes.scope = scope; Notes.file = file; Notes.kind = kind;
@@ -727,7 +731,7 @@ window.tabOverview = async (c, el) => {
             <div class="block pn-block" id="ov-pn"></div>
             <div class="block"><div class="block-h"><b>Tempo di studio</b></div><div class="stats2"><div><b>${fmtMin(w.stats.today)}</b><span>oggi</span></div><div><b>${fmtMin(w.stats.week)}</b><span>7 giorni</span></div><div><b>${w.stats.sessions}</b><span>sessioni</span></div></div>
                 <button class="small ghost" id="ov-pomo">${icon('timer')} Studia con il timer</button></div>
-            <div class="block"><div class="block-h"><b>Appunti</b><span class="grow"></span><button class="small ghost icon" id="ov-newnote" title="Nuovo appunto" aria-label="Nuovo appunto">${icon('plus')}</button></div>${files.slice(0, 6).map(f => `<div class="lnk" data-note="${esc(f.file)}" data-k="${f.kind}"><span class="badge-k ${f.kind}">${{ markdown: 'MD', latex: 'TeX', typst: 'Typ' }[f.kind]}</span> ${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</div>`).join('') || '<p class="faint">Nessun appunto.</p>'}</div>
+            <div class="block ov-notes" id="ov-notes"><div class="block-h"><b>Appunti</b><span class="grow"></span><button class="small ghost icon" id="ov-upnote" title="Carica i tuoi appunti (PDF, foto, documenti…)" aria-label="Carica appunti">${icon('download')}</button><button class="small ghost icon" id="ov-newnote" title="Nuovo appunto" aria-label="Nuovo appunto">${icon('plus')}</button></div>${files.slice(0, 6).map(f => `<div class="lnk" data-note="${esc(f.file)}" data-k="${f.kind}">${noteBadge(f)} ${noteName(f)}</div>`).join('') || '<p class="faint">Nessun appunto. Trascina qui un PDF o premi ↓ per caricarne uno.</p>'}</div>
             <div class="block"><div class="block-h"><b>Materiale</b><span class="grow"></span><a data-tab="materiale">Tutto →</a></div>${mats.map(f => `<div class="lnk" data-mat="${esc(f)}"><span class="faint">${icon('file')}</span> ${esc(f.split('/').pop())}</div>`).join('') || '<p class="faint">Nessun file.</p>'}</div>
         </div></div>`;
     if (window.PnUI) PnUI.overview(c, $('#ov-pn', el));
@@ -737,6 +741,8 @@ window.tabOverview = async (c, el) => {
     $$('[data-mat]', el).forEach(a => a.onclick = () => guard(() => api.open(c.id, 'materials', a.dataset.mat)));
     $$('[data-note]', el).forEach(a => a.onclick = () => go({ name: 'notes', scope: c.id, file: a.dataset.note, kind: a.dataset.k }));
     $('#ov-newnote', el).onclick = () => go({ name: 'notes', scope: c.id });
+    $('#ov-upnote', el).onclick = () => Upload.open({ courseId: c.id });
+    Upload.zone($('#ov-notes', el), files => Upload.open({ courseId: c.id, files }));
     $('#ov-pomo', el).onclick = () => openFocusSheet(c.id);
     let pageEd = null;
     $('#pg-edit', el).onclick = () => {

@@ -13,7 +13,7 @@ pub const METHODS: &[&str] = &[
     "recording", "read-file", "open", "open-path", "reveal", "settings:save",
     "ws:get", "ws:page", "ws:todo:add", "ws:todo:set", "ws:todo:remove", "ws:pomodoro", "ws:all-todos",
     "notes:scopes", "notes:list", "notes:read", "notes:write", "notes:create", "notes:rename", "notes:remove", "notes:asset", "notes:dir",
-    "notes:links", "notes:setLinks", "notes:forLesson", "notes:linkCounts", "notes:createLinked", "notes:engines", "notes:installEngine", "notes:compile",
+    "notes:links", "notes:setLinks", "notes:forLesson", "notes:linkCounts", "notes:createLinked", "notes:import", "notes:engines", "notes:installEngine", "notes:compile",
     "notes:exportTo", "notes:path", "integrations:apps", "integrations:testNotion", "integrations:openPdfIn",
     "cloud:detect", "cloud:set", "cloud:pull", "cloud:autopull",
     "daemon:info", "daemon:shutdown", "app:ready",
@@ -219,6 +219,29 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
             notes::set_links(&dir, &f, &p["links"])?;
             d.notes_changed(p.str_of("scope"));
             Ok(json!(f))
+        })
+        .await,
+        // files of the student (PDF, photos, slides…) copied among the notes, optionally linked to lessons
+        "notes:import" => blocking(move || {
+            let dir = notes_dir(&p["scope"])?;
+            let mut done = vec![];
+            let mut errors = vec![];
+            for src in util::str_list(p.get("paths")) {
+                match notes::import(&dir, std::path::Path::new(&src), p.str_of("folder")) {
+                    Ok(f) => {
+                        if p["links"].as_array().is_some_and(|a| !a.is_empty()) {
+                            notes::set_links(&dir, &f, &p["links"])?;
+                        }
+                        done.push(f);
+                    }
+                    Err(e) => errors.push(json!({ "path": src, "error": e.to_string() })),
+                }
+            }
+            if !done.is_empty() {
+                d.notes_changed(p.str_of("scope"));
+                d.log(format!("📎 {} file caricati negli appunti", done.len()), p.str_of("scope"));
+            }
+            Ok(json!({ "files": done, "errors": errors }))
         })
         .await,
         "notes:engines" => blocking(|| Ok(notes::engine_status())).await,

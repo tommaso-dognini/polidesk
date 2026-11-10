@@ -333,6 +333,8 @@ function tabLessons(c, el) {
         $$('.lcard', el).forEach(card => {
             const open = extra => { lessonFilter.last = card.dataset.key; lessonFilter.restore = true; go({ name: 'recording', courseId: c.id, key: card.dataset.key, back: 'lezioni', ...extra }); };
             card.onkeydown = e => { if (e.key === 'Enter' && e.target === card) { e.preventDefault(); open({}); } };
+            // drop a PDF / photo on a lesson: uploaded among the course notes, linked to that lesson
+            Upload.zone(card, files => Upload.open({ courseId: c.id, key: card.dataset.key, files }).then(ok => ok && api.notes.linkCounts(c.id).then(x => { counts = x || {}; draw(); })));
             card.onclick = e => {
                 const b = e.target.closest('[data-act]');
                 if (!b) return open({});
@@ -783,11 +785,13 @@ async function drawLinkedNotes(c, r, el) {
     el.innerHTML = '<div class="empty-state"><span class="spin"></span></div>';
     const list = await api.notes.forLesson(c.id, r.key);
     if (sideTab() !== 'appunti' || !el.isConnected) return;
-    el.innerHTML = `<div class="ln-actions"><button class="small" id="ln-new">${icon('plus')} Nuovo appunto</button><button class="small ghost" id="ln-link">Collega esistente…</button></div>
+    el.innerHTML = `<div class="ln-actions"><button class="small" id="ln-new">${icon('plus')} Nuovo appunto</button><button class="small" id="ln-up">${icon('download')} Carica file…</button><button class="small ghost" id="ln-link">Collega esistente…</button></div>
         ${list.length ? list.map(n => `<div class="ln-item" data-scope="${esc(n.scope || '')}" data-f="${esc(n.file)}" data-k="${n.kind}">
-            <div class="row"><span class="badge-k ${n.kind}">${({ markdown: 'MD', latex: 'TeX', typst: 'Typ' })[n.kind]}</span><b class="grow">${esc(n.file.replace(/\.(md|tex|typ)$/, ''))}</b><button class="icon ghost small" data-unlink title="Scollega da questa lezione">✕</button></div>
+            <div class="row">${noteBadge(n)}<b class="grow">${noteName(n)}</b><button class="icon ghost small" data-unlink title="Scollega da questa lezione">✕</button></div>
             <div class="faint ln-sub">${n.scope ? esc(cname(course(n.scope) || { name: '' })) : 'Generale'}${n.links.length > 1 ? ` · collegato anche a ${n.links.length - 1} altr${n.links.length === 2 ? 'a lezione' : 'e lezioni'}` : ''}</div></div>`).join('')
-            : `<div class="empty-state small"><p>Nessun appunto collegato a questa lezione.</p><p class="faint">Un appunto può essere collegato a più lezioni: crealo qui o collegalo dall'editor degli appunti.</p></div>`}`;
+            : `<div class="empty-state small ln-drop"><div class="up-ico">${icon('download')}</div><p><b>Trascina qui i tuoi appunti</b></p><p class="faint">PDF, foto degli appunti a mano, slide annotate… oppure scrivine uno nuovo. Un appunto può essere collegato a più lezioni.</p></div>`}`;
+    $('#ln-up', el).onclick = () => Upload.open({ courseId: c.id, key: r.key }).then(ok => ok && drawLinkedNotes(c, r, el));
+    if (!el.dataset.zone) { el.dataset.zone = '1'; Upload.zone(el, files => Upload.open({ courseId: c.id, key: r.key, files }).then(ok => ok && sideTab() === 'appunti' && drawLinkedNotes(c, r, el))); }
     $('#ln-new', el).onclick = () => guard(async () => {
         const x = await askNewNote(S.settings.editor.mode || 'markdown');
         if (!x) return;
@@ -809,7 +813,7 @@ async function pickNotesToLink(c, r) {
     const lists = await Promise.all(scopes.map(async s => ({ s, files: await api.notes.list(s.id), links: await Promise.all((await api.notes.list(s.id)).map(f => api.notes.links(s.id, f.file))) })));
     return new Promise(resolve => {
         const m = modal(`<h2>Collega appunti a questa lezione</h2><p class="muted" style="margin-top:0">${esc(lessonLabel(c.id, r.key))}</p>
-            <div class="pick-list">${lists.map(({ s, files, links }) => files.length ? `<div class="pick-h">${esc(s.name)}</div>${files.map((f, i) => `<label class="pick"><input type="checkbox" data-scope="${esc(s.id || '')}" data-f="${esc(f.file)}" ${links[i].some(l => l.c === c.id && l.k === r.key) ? 'checked' : ''}><span class="badge-k ${f.kind}">${({ markdown: 'MD', latex: 'TeX', typst: 'Typ' })[f.kind]}</span>${esc(f.file.replace(/\.(md|tex|typ)$/, ''))}</label>`).join('')}` : '').join('') || '<p class="muted">Non ci sono ancora appunti.</p>'}</div>
+            <div class="pick-list">${lists.map(({ s, files, links }) => files.length ? `<div class="pick-h">${esc(s.name)}</div>${files.map((f, i) => `<label class="pick"><input type="checkbox" data-scope="${esc(s.id || '')}" data-f="${esc(f.file)}" ${links[i].some(l => l.c === c.id && l.k === r.key) ? 'checked' : ''}>${noteBadge(f)}${noteName(f)}</label>`).join('')}` : '').join('') || '<p class="muted">Non ci sono ancora appunti.</p>'}</div>
             <div class="foot"><button class="ghost" id="pk-no">Annulla</button><button class="primary" id="pk-ok">Salva</button></div>`);
         $('#pk-no', m.el).onclick = () => { m.close(); resolve(false); };
         $('#pk-ok', m.el).onclick = () => guard(async () => {

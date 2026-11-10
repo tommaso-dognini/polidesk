@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const invoke = (ch, arg) => ipcRenderer.invoke(ch, arg);
 
@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('polidesk', {
     saveSettings: s => invoke('settings:save', s),
     setAppearance: a => invoke('appearance', a),
     pickDir: def => invoke('pick-dir', def),
+    pickFiles: () => invoke('pick-files'),
+    /** path on disk of a file dropped on the page (Electron ≥ 32: File.path is gone) */
+    filePath: f => { try { return webUtils.getPathForFile(f) || ''; } catch (e) { return ''; } },
     open: (courseId, kind, file) => invoke('open', { courseId, kind, file }),
     openPath: p => invoke('open-path', p),
     openExternal: u => invoke('open-external', u),
@@ -81,6 +84,7 @@ contextBridge.exposeInMainWorld('polidesk', {
         forLesson: (courseId, key) => invoke('notes:forLesson', { courseId, key }),
         linkCounts: courseId => invoke('notes:linkCounts', courseId),
         createLinked: (scope, title, kind, links, content) => invoke('notes:createLinked', { scope, title, kind, links, content }),
+        import: (scope, paths, links, folder) => invoke('notes:import', { scope, paths, links: links || [], folder: folder || null }),
         engines: () => invoke('notes:engines'),
         installEngine: n => invoke('notes:installEngine', n),
         compile: (scope, file) => invoke('notes:compile', { scope, file }),
