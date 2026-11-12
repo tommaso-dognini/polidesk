@@ -4,6 +4,9 @@
   "description": "Registrazioni, appunti, calendario e strumenti di studio per gli studenti del Politecnico di Milano (app non ufficiale)",
   "main": "src/main.js",
   "license": "GPL-3.0-or-later",
+  "repository": "github:tommaso-dognini/polidesk",
+  "homepage": "https://github.com/tommaso-dognini/polidesk",
+  "bugs": "https://github.com/tommaso-dognini/polidesk/issues",
   "scripts": {
     "start": "electron .",
     "cli": "cargo run -q --release -p polidesk --",
@@ -116,6 +119,8 @@
     "publish": [
       {
         "provider": "github",
+        "owner": "tommaso-dognini",
+        "repo": "polidesk",
         "releaseType": "release"
       }
     ],
@@ -133,6 +138,6 @@
   },
   "polidesk": {
     "donateUrl": "",
-    "repo": ""
+    "repo": "tommaso-dognini/polidesk"
   }
 }

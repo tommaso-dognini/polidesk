@@ -86,7 +86,7 @@ polidesk rooms --from 14:00 --hours 2        # aule libere
 ## Sviluppo
 
 ```bash
-git clone <questa-repo> polidesk && cd polidesk
+git clone https://github.com/tommaso-dognini/polidesk.git && cd polidesk
 npm install
 npm start               # avvia l'app (compila editor e backend Rust)
 npm run cli -- help     # riga di comando
@@ -95,6 +95,18 @@ npm run dist:mac        # installer (anche dist:win, dist:linux)
 
 Requisiti: Node.js 22+, Rust (stable, via [rustup](https://rustup.rs)), Google Chrome. Struttura del codice, test con dati isolati (`POLIDESK_HOME`) e rilascio:
 **[Sviluppo](docs/wiki/Sviluppo.md)**.
+
+## Contribuire
+
+I contributi sono benvenuti: segnalazioni di bug, idee, documentazione e codice.
+
+1. Apri una [issue](https://github.com/tommaso-dognini/polidesk/issues) per segnalare un problema o proporre un'idea
+   (per le modifiche grandi, parliamone prima di scrivere codice).
+2. Fai un fork, crea un branch dal `main` e fai le prove con dati isolati (`POLIDESK_HOME=/tmp/polidesk-test npm start`).
+3. Controlla che `cargo build && cargo test` passino e apri una pull request che spieghi cosa cambia e perché.
+
+Guida completa, stile e regole (privacy, uso responsabile, licenze): **[CONTRIBUTING.md](CONTRIBUTING.md)**.
+Inviando un contributo accetti che sia distribuito con la licenza del progetto (GPL-3.0-or-later).
 
 ## Privacy
 
