@@ -26,6 +26,7 @@ pub const METHODS: &[&str] = &[
     "transcribe:pause", "transcribe:resume", "transcriptions:pauseAll", "transcriptions:resumeAll",
     "drives:status", "drive:wait", "login:done", "login:cancel", "ai:use", "ai:wait", "ai:resume", "ai:models", "ai:rescan", "rec:stream", "rec:streamTarget", "rec:downloadVideo", "course:freeSpace", "deps:status", "deps:install", "deps:terminal",
     "pn:index", "pn:match", "pn:tree", "pn:download", "pn:status", "pn:cancel",
+    "materials:remove", "exams:run",
 ];
 
 /// Run blocking filesystem work off the async workers.
@@ -111,6 +112,21 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
             Ok(json!(std::fs::read_to_string(notes::safe(&base, p.req("file")?)?)?))
         })
         .await,
+        "materials:remove" => {
+            let r = blocking(move || remove_materials(p.req("courseId")?, &util::str_list(p.get("paths")))).await?;
+            d.refresh();
+            Ok(r)
+        }
+        // "Cerca ora": past exams of this course, without downloading lessons
+        "exams:run" => {
+            let id = p.req("courseId")?.to_string();
+            let c = config::course(&id)?;
+            if c["pastExams"].as_bool() != Some(true) {
+                config::patch_course(&id, &json!({ "pastExams": true }))?;
+            }
+            d.enqueue_sync_with(&id, json!({ "onlyMaterials": true, "materials": c["materials"].as_bool() == Some(true), "exams": true }));
+            Ok(json!(true))
+        }
         "open" => blocking(move || {
             let pth = course_path(p.req("courseId")?, p.str_of("kind").unwrap_or(""), p.str_of("file"))?;
             if !pth.exists() {
@@ -332,13 +348,19 @@ pub fn bytes_param(v: &Value) -> Result<Vec<u8>> {
 pub fn course_view(c: &Value) -> Value {
     let dir = lib::dir_of(c);
     let m = lib::load_manifest(&dir);
-    let mut mats: Vec<String> = m["materials"].as_object().map(|o| o.values().map(|x| util::s(x, "path").replace('\\', "/")).collect()).unwrap_or_default();
+    let mut mats: Vec<String> = m["materials"].as_object().map(|o| o.values().filter(|x| !util::b(x, "deleted")).map(|x| util::s(x, "path").replace('\\', "/")).collect()).unwrap_or_default();
     mats.sort_by(|a, b| util::natural_cmp(a, b));
     mats.dedup();
     let pn_files = polidesk_core::polinetwork::local_files(&dir);
     if !pn_files.is_empty() {
         mats.retain(|f| !f.starts_with("PoliNetwork/"));
         mats.extend(pn_files);
+        mats.sort_by(|a, b| util::natural_cmp(a, b));
+    }
+    let exam_files = polidesk_core::exams::local_files(&dir);
+    if !exam_files.is_empty() {
+        mats.retain(|f| !f.starts_with(&format!("{}/", polidesk_core::exams::LOCAL_DIR)));
+        mats.extend(exam_files);
         mats.sort_by(|a, b| util::natural_cmp(a, b));
     }
     if dir.join("materiale").join("LINK.md").exists() {
@@ -353,6 +375,7 @@ pub fn course_view(c: &Value) -> Value {
             "dirExists": dir.exists(),
             "drive": polidesk_core::drives::info(&dir),
             "materialFiles": mats,
+            "exams": polidesk_core::exams::view(&dir),
         }),
     )
 }
@@ -398,6 +421,47 @@ fn course_update(d: &Arc<Daemon>, id: &str, patch: &Value) -> Result<Value> {
         d.notes_changed(Some(id));
     }
     Ok(course_view(&c))
+}
+
+/// Move material files or folders to the Trash (recoverable) and make sure sync does not bring them back.
+fn remove_materials(id: &str, paths: &[String]) -> Result<Value> {
+    let c = config::course(id)?;
+    let dir = lib::dir_of(&c);
+    lib::ensure_drive(&dir)?;
+    let root = dir.join("materiale");
+    let rels: Vec<String> = paths.iter().map(|p| p.trim_matches('/').replace('\\', "/")).filter(|p| !p.is_empty() && p != ".").collect();
+    if rels.is_empty() {
+        bail!("Nessun file da eliminare");
+    }
+    let mut n = 0;
+    for r in &rels {
+        let p = notes::safe(&root, r)?;
+        if p == root {
+            bail!("percorso non valido");
+        }
+        if p.exists() {
+            sys::trash(&p)?;
+            n += 1;
+        }
+    }
+    // WeBeep material: remembered as deleted, so the next sync skips it
+    let mut m = lib::load_manifest(&dir);
+    let under = |p: &str| rels.iter().any(|r| p == r || p.starts_with(&format!("{r}/")));
+    let mut changed = false;
+    if let Some(o) = m["materials"].as_object_mut() {
+        for v in o.values_mut() {
+            let p = util::s(v, "path").replace('\\', "/");
+            if under(&p) && !util::b(v, "deleted") {
+                v["deleted"] = json!(true);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        lib::save_manifest(&dir, &m)?;
+    }
+    polidesk_core::polinetwork::forget(&dir, &rels)?;
+    Ok(json!({ "trashed": n }))
 }
 
 /// Move to the Trash (recoverable) video, transcripts and AI notes of lessons by teachers the student does not follow.

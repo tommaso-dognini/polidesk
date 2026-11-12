@@ -12,6 +12,10 @@ const tprog = {};                               // video path -> 'queued' | numb
 const running = new Set();                      // course ids syncing
 let player = null;                              // current <video> (recording page)
 let aiStream = null, aiJob = null;                            // element receiving streamed AI output
+// "Modalità appunti": this window shows only one lesson (player + transcript); every other page opens in the main window
+const POPOUT = (() => { const q = new URLSearchParams(location.search); return q.get('popout') === '1' ? { courseId: q.get('course'), key: q.get('key'), t: Number(q.get('t') || 0), play: q.get('play') === '1' } : null; })();
+if (POPOUT) { document.documentElement.classList.add('popout'); route = { name: 'recording', courseId: POPOUT.courseId, key: POPOUT.key, t: POPOUT.t, autoplay: POPOUT.play }; }
+const setTheater = on => { document.documentElement.classList.toggle('theater', !!on); };
 
 // ───────── helpers ─────────
 function toast(msg, ms = 3200) {
@@ -69,6 +73,12 @@ const ICONS = {
     cloud: '<path d="M17.5 19H7a5 5 0 1 1 .9-9.9A6 6 0 0 1 19.4 11 4 4 0 0 1 17.5 19z"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
     command: '<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/>',
+    trash: '<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>',
+    popout: '<rect x="2" y="4" width="13" height="11" rx="2"/><path d="M9 19h11a2 2 0 0 0 2-2V9M19 15V9"/>',
+    popin: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M14 10l-5 5M9 10v5h5"/>',
+    theater: '<rect x="2" y="6" width="20" height="12" rx="2"/>',
+    captions: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 15h4M13 15h4M7 11h10"/>',
+    exam: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l2 2 4-4"/>',
 };
 const icon = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
@@ -116,6 +126,9 @@ async function refresh() {
 const hist = { back: [], fwd: [] };              // navigation history (⌘[ / ⌘])
 const sameRoute = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function go(r, { fromHist = false } = {}) {
+    // lesson window: other pages open in the main window
+    if (POPOUT && r.name !== 'recording') { api.lesson.mainGo(r); return; }
+    if (r.name !== 'recording') setTheater(false);
     if (player && r.name !== 'recording') { player.pause(); player = null; }
     if (route.name === 'notes' && window.flushNote) window.flushNote();
     if (!fromHist && route.name !== 'setup' && !sameRoute(route, r)) { hist.back.push(route); if (hist.back.length > 60) hist.back.shift(); hist.fwd.length = 0; }
@@ -126,7 +139,7 @@ function goForward() { const r = hist.fwd.pop(); if (!r) return; hist.back.push(
 
 function render() {
     if (!S) return;
-    if (!S.settings.setupDone && route.name !== 'setup' && !render.skippedSetup) route = { name: 'setup' };
+    if (!S.settings.setupDone && route.name !== 'setup' && !render.skippedSetup && !POPOUT) route = { name: 'setup' };
     renderSidebar();
     const v = $('#view');
     const views = { dashboard: viewDashboard, course: viewCourse, recording: viewRecording, settings: viewSettings, setup: viewSetup, /* community: viewCommunity, — hidden for now */ ...(window.extraViews || {}) };
@@ -308,7 +321,8 @@ function tabLessons(c, el) {
         if ($('#l-sync', el)) $('#l-sync', el).onclick = () => guard(() => api.sync([c.id]));
         return;
     }
-    const FILTERS = { all: ['Tutte', () => true], todo: ['Da scaricare', r => !r.videoExists], nt: ['Da trascrivere', r => r.videoExists && !r.transcript] };
+    const doneL = doneSet(c, 'doneLessons');
+    const FILTERS = { all: ['Tutte', () => true], undone: ['Non fatte', r => !doneL.has(r.key)], todo: ['Da scaricare', r => !r.videoExists], nt: ['Da trascrivere', r => r.videoExists && !r.transcript] };
     if (!FILTERS[lessonFilter.f]) lessonFilter.f = 'all';
     const pending = recs.filter(FILTERS.nt[1]).length;
     el.innerHTML = `<div class="toolbar">
@@ -340,7 +354,8 @@ function tabLessons(c, el) {
                 if (!b) return open({});
                 e.stopPropagation();
                 const a = b.dataset.act;
-                if (a === 'notes') open({ side: 'appunti' });
+                if (a === 'done') guard(async () => { const on = await toggleDone(c, 'doneLessons', card.dataset.key); toast(on ? 'Lezione segnata come fatta' : 'Lezione segnata come da fare'); tabLessons(c, el); });
+                else if (a === 'notes') open({ side: 'appunti' });
                 else if (a.startsWith('ai:')) open({ study: a.slice(3) });
                 else if (a === 'dl') guard(() => api.sync([c.id]));
                 else if (a === 'dlpause') guard(async () => { await api.activity.pauseDownload(c.id, card.dataset.key); toast('Download in pausa'); });
@@ -405,33 +420,143 @@ function lessonCard(c, r, num, linked) {
         ? `${r.summary ? `<p class="sum">${esc(r.summary)}</p>` : ''}${bullets.length ? `<ul>${bullets.slice(0, 4).map(b => `<li>${esc(b)}</li>`).join('')}${bullets.length > 4 ? `<li class="faint more">e altri ${bullets.length - 4} argomenti</li>` : ''}</ul>` : ''}`
         : (r.transcript ? '<p class="sum faint">Sommario non ancora generato.</p>' : '');
     const meta = [d ? d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined }) : '—', r.teacher, r.type, r.duration].filter(Boolean).map(esc).join(' · ');
-    return `<article class="lcard ${r.videoExists || c.streamOnly ? '' : 'missing'}" tabindex="0" data-key="${esc(r.key)}">
-        <div class="lc-meta"><span class="lc-n">${num}</span><span class="lc-m">${meta}</span><span class="grow"></span>${state}</div>
+    const done = doneSet(c, 'doneLessons').has(r.key);
+    return `<article class="lcard ${r.videoExists || c.streamOnly ? '' : 'missing'} ${done ? 'done' : ''}" tabindex="0" data-key="${esc(r.key)}">
+        <div class="lc-meta"><span class="lc-n">${num}</span><span class="lc-m">${meta}</span><span class="grow"></span>${state}<button class="lc-done ${done ? 'on' : ''}" data-act="done" title="${done ? 'Fatta: clicca per segnarla da fare' : 'Segna la lezione come fatta'}" aria-pressed="${done}">${icon('check')}<span>${done ? 'Fatta' : 'Fatta?'}</span></button></div>
         <h3>${esc(r.displayTitle || r.file)}</h3>
         ${sum}
         ${tags.length ? `<div class="lc-links">${tags.join('')}</div>` : ''}</article>`;
 }
 
+// "fatta" flags for lessons and past exams, kept in the course config (doneLessons / doneExams)
+const doneSet = (c, k) => new Set(Array.isArray(c[k]) ? c[k] : []);
+async function toggleDone(c, k, id) {
+    const set = doneSet(c, k);
+    if (set.has(id)) set.delete(id); else set.add(id);
+    c[k] = [...set];
+    await api.updateCourse(c.id, { [k]: c[k] });
+    return set.has(id);
+}
+const matOpen = {};                               // courseId → Set of open folders (kept across re-renders)
 function tabMaterials(c, el) {
-    if (!c.materials && !(c.materialFiles || []).length) {
+    const ex = c.exams && c.exams.list ? c.exams : null;
+    if (!c.materials && !(c.materialFiles || []).length && !c.pastExams) {
         el.innerHTML = `<div class="empty-state"><h2>Materiale del corso</h2><p>Slide, PDF e cartelle pubblicate su WeBeep, organizzate per sezione.<br>Il download del materiale è disattivato per questo corso.</p>
-            <button class="primary" id="m-on">Attiva e sincronizza</button></div>`;
+            <div class="row" style="justify-content:center;gap:8px"><button class="primary" id="m-on">Attiva e sincronizza</button><button id="m-ex">${icon('exam')} Solo i temi d'esame degli anni passati</button></div></div>`;
         $('#m-on', el).onclick = () => guard(async () => { await api.updateCourse(c.id, { materials: true }); await api.sync([c.id]); refresh(); });
+        $('#m-ex', el).onclick = () => guard(async () => { await api.exams.run(c.id); toast('Cerco i temi d\'esame degli anni passati: lo vedi in Attività'); await refresh(); });
         return;
     }
     const tree = c.materialFiles || [];
     el.innerHTML = `<div class="toolbar"><span class="muted">${tree.length} file in <code>materiale/</code></span><span class="grow"></span>
-        <button id="m-pn" class="ghost">Appunti PoliNetwork…</button><button id="m-open" class="ghost">Apri cartella</button>${c.materials ? `<button id="m-sync">${icon('refresh')} Aggiorna</button>` : ''}</div><div class="list files" id="m-tree"></div>`;
+        <button id="m-pn" class="ghost">Appunti PoliNetwork…</button><button id="m-open" class="ghost">Apri cartella</button>${c.materials ? `<button id="m-sync">${icon('refresh')} Aggiorna</button>` : ''}</div>
+        <div id="m-exams"></div>
+        <div class="list files" id="m-tree"></div>`;
     $('#m-pn', el).onclick = () => go({ name: 'course', courseId: c.id, tab: 'polinetwork' });
     $('#m-open', el).onclick = () => guard(() => api.open(c.id, 'materials'));
     if ($('#m-sync', el)) $('#m-sync', el).onclick = () => guard(() => api.sync([c.id]));
-    if (!tree.length) { $('#m-tree', el).innerHTML = '<div class="empty-state">Nessun file ancora: premi Aggiorna.</div>'; return; }
-    const groups = {};
-    for (const f of tree) { const s = f.includes('/') ? f.split('/')[0] : 'Generale'; (groups[s] = groups[s] || []).push(f); }
+    drawExams(c, $('#m-exams', el), ex);
+    if (!tree.length) { $('#m-tree', el).innerHTML = `<div class="empty-state">Nessun file ancora${c.materials ? ': premi Aggiorna.' : '.'}</div>`; return; }
+
+    // nested tree: section / folder / … / file (PoliNetwork and past exams keep their folders)
+    const root = { dirs: {}, files: [] };
+    for (const f of tree) {
+        const parts = f.includes('/') ? f.split('/') : ['Generale', f];
+        let n = root, path = '';
+        for (const p of parts.slice(0, -1)) { path = path ? path + '/' + p : p; n = n.dirs[p] || (n.dirs[p] = { dirs: {}, files: [], path }); }
+        n.files.push({ rel: f, name: parts[parts.length - 1] });
+    }
+    const count = n => n.files.length + Object.values(n.dirs).reduce((a, d) => a + count(d), 0);
+    const open = matOpen[c.id] || (matOpen[c.id] = new Set(Object.keys(root.dirs).length <= 4 ? Object.values(root.dirs).map(d => d.path) : []));
     const fIco = f => icon(/\.(zip|rar|7z|gz)$/i.test(f) ? 'folder' : /\.md$/i.test(f) ? 'external' : 'file');
-    $('#m-tree', el).innerHTML = Object.entries(groups).map(([s, fs]) => `<details ${Object.keys(groups).length <= 4 ? 'open' : ''}><summary>${esc(s)} <span class="muted" style="font-weight:400">${fs.length}</span></summary>
-        ${fs.map(f => `<div class="f" data-f="${esc(f)}"><span class="faint">${fIco(f)}</span>${esc(f.split('/').slice(1).join(' / ') || f)}</div>`).join('')}</details>`).join('');
-    $$('.f', el).forEach(x => x.onclick = () => guard(() => api.open(c.id, 'materials', x.dataset.f)));
+    const delBtn = (what, label) => `<button class="small ghost icon m-del" data-del="${esc(what)}" title="Elimina ${label}" aria-label="Elimina ${label}">${icon('trash')}</button>`;
+    const sorted = o => Object.entries(o).sort(([a], [b]) => a.localeCompare(b, 'it', { numeric: true }));
+    const dirHtml = (n, depth) => sorted(n.dirs).map(([name, d]) => `<details class="m-d" data-path="${esc(d.path)}" ${open.has(d.path) ? 'open' : ''} style="--d:${depth}">
+            <summary><span class="faint">${icon('folder')}</span><span class="nm">${esc(name)}</span><span class="muted m-n">${count(d)}</span><span class="grow"></span>${d.path === 'Generale' && !tree.some(f => f.startsWith('Generale/')) ? '' : delBtn(d.path + '/', 'la cartella')}</summary>
+            ${open.has(d.path) ? dirHtml(d, depth + 1) : ''}</details>`).join('')
+        + n.files.map(f => `<div class="f" data-f="${esc(f.rel)}" style="--d:${depth}" title="${esc(f.rel)}"><span class="faint">${fIco(f.name)}</span><span class="nm">${esc(f.name)}</span><span class="grow"></span>${f.rel === 'LINK.md' ? '' : delBtn(f.rel, 'il file')}</div>`).join('');
+    const draw = () => {
+        const sc = $('#view').scrollTop;
+        $('#m-tree', el).innerHTML = dirHtml(root, 0);
+        $('#view').scrollTop = sc;
+        // open/close handled here (not by <details>), so the state survives re-renders
+        $$('#m-tree details.m-d > summary', el).forEach(sm => sm.onclick = e => {
+            e.preventDefault();
+            if (e.target.closest('[data-del]')) return;
+            const p = sm.parentElement.dataset.path;
+            if (open.has(p)) open.delete(p); else open.add(p);
+            draw();
+        });
+        $$('#m-tree .f', el).forEach(x => x.onclick = e => { if (e.target.closest('[data-del]')) return; guard(() => api.open(c.id, 'materials', x.dataset.f)); });
+        $$('#m-tree [data-del]', el).forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); deleteMaterial(c, b.dataset.del); });
+    };
+    draw();
+}
+
+/** Delete a material file or folder (to the system Trash): sync will not download it again. */
+function deleteMaterial(c, what) {
+    const isDir = what.endsWith('/');
+    const rel = what.replace(/\/$/, '');
+    // the "Generale" group is the material root: its files, not the folder
+    const files = (c.materialFiles || []).filter(f => isDir ? (rel === 'Generale' ? !f.includes('/') : f.startsWith(rel + '/')) : f === rel);
+    const paths = isDir && rel === 'Generale' ? files.filter(f => f !== 'LINK.md') : [rel];
+    if (!paths.length) return;
+    const name = rel.split('/').pop();
+    const m = modal(`<h2>Eliminare ${isDir ? 'la cartella' : 'il file'}?</h2>
+        <p><b>${esc(name)}</b>${isDir ? ` <span class="muted">(${files.length} file)</span>` : ''}</p>
+        <p class="muted" style="margin-top:0">Va nel Cestino, da cui puoi recuperarl${isDir ? 'a' : 'o'}. PoliDesk non ${isDir ? 'li' : 'lo'} riscaricherà alla prossima sincronizzazione.</p>
+        <div class="foot"><button class="ghost" id="md-no">Annulla</button><button class="primary danger" id="md-ok">${icon('trash')} Sposta nel Cestino</button></div>`);
+    $('#md-no', m.el).onclick = m.close;
+    $('#md-ok', m.el).onclick = () => guard(async () => {
+        m.close();
+        const r = await api.removeMaterials(c.id, paths);
+        toast(isDir ? `Cartella «${name}» nel Cestino` : `«${name}» nel Cestino`);
+        $('#view').dataset.view = ''; await refresh();
+        return r;
+    });
+}
+
+/** Past exams (TdE) of the course: text + solution, newest first. */
+function drawExams(c, el, ex) {
+    const busy = running.has(c.id);
+    if (!c.pastExams && !(ex && ex.list.length)) {
+        el.innerHTML = `<div class="ex-box ex-off"><span class="ex-ico">${icon('exam')}</span><div class="grow"><b>Temi d'esame degli anni passati</b><div class="faint">Cerca il corso negli anni accademici precedenti su WeBeep (e nell'archivio PoliNetwork, se collegato) e scarica tutti i temi d'esame, con le soluzioni, senza doppioni. Se un'edizione passata permette l'iscrizione spontanea, ti iscrive solo il tempo di scaricarli.</div></div>
+            <button class="primary small" id="ex-on">Attiva</button></div>`;
+        $('#ex-on', el).onclick = () => guard(async () => { await api.updateCourse(c.id, { pastExams: true }); await api.exams.run(c.id); toast('Cerco i temi d\'esame: lo vedi in Attività'); $('#view').dataset.view = ''; await refresh(); });
+        return;
+    }
+    const list = ex ? ex.list : [];
+    const eds = ex && ex.editions ? ex.editions : [];
+    const checked = ex && ex.checkedAt ? new Date(ex.checkedAt).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    const fmtD = d => !d ? '' : d.length === 7 ? new Date(d + '-01').toLocaleDateString('it-IT', { month: 'short', year: 'numeric' }) : new Date(d).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+    const src = { webeep: 'quest\'anno', past: 'WeBeep', polinetwork: 'PoliNetwork' };
+    const nSol = list.filter(e => e.solution).length;
+    const doneE = doneSet(c, 'doneExams'), eKey = e => e.exam || e.solution;
+    const nDone = list.filter(e => doneE.has(eKey(e))).length;
+    const btn = (rel, label, cls) => rel ? `<button class="small ${cls}" data-open-f="${esc(rel)}" title="${esc(rel)}">${label}</button>` : '';
+    el.innerHTML = `<details class="ex-box" ${localStorage.getItem('exOpen:' + c.id) === '0' ? '' : 'open'}><summary><span class="ex-ico">${icon('exam')}</span><b>Temi d'esame</b>
+            <span class="muted">${list.length ? `${list.length} · ${nSol} con soluzione · ${nDone} ${nDone === 1 ? 'fatto' : 'fatti'}` : ''}</span><span class="grow"></span>
+            <span class="faint ex-meta">${busy ? '<span class="spin"></span> ricerca in corso…' : checked ? `cercati il ${esc(checked)}${eds.length ? ` · ${eds.filter(e => e.accessible).length}/${eds.length} edizioni passate accessibili` : ''}` : 'non ancora cercati'}</span>
+            <button class="small ghost" id="ex-run" ${busy ? 'disabled' : ''} title="Cerca su WeBeep le edizioni passate del corso e scarica i temi d'esame nuovi">${icon('refresh')} Cerca ora</button><button class="small ghost icon" id="ex-more" title="Opzioni" aria-label="Opzioni">${icon('more')}</button></summary>
+        <p class="ex-help faint">${icon('info')}<span><b>Cosa fa «Cerca ora».</b> Cerca su WeBeep le edizioni degli anni passati di questo corso (stesso codice o stesso nome) e legge il loro materiale${c.pastExamsEnrol === false ? '' : '. Se un\'edizione permette l\'iscrizione spontanea senza chiave, ti iscrive per il tempo del download e poi ti disiscrive'}. Scarica i file che sembrano temi d'esame o soluzioni e aggiunge quelli dell'archivio PoliNetwork collegato e del materiale di quest'anno. Scarta i doppioni (stesso contenuto) e abbina ogni testo alla sua soluzione. Durante la sincronizzazione la ricerca riparte da sola, al massimo ogni 3 giorni.</span></p>
+        ${list.length ? `<div class="ex-list">${list.map(e => `<div class="ex-row ${doneE.has(eKey(e)) ? 'done' : ''}">
+            <label class="ex-chk" title="Segna il tema d'esame come fatto"><input type="checkbox" data-exdone="${esc(eKey(e))}" ${doneE.has(eKey(e)) ? 'checked' : ''}></label>
+            <span class="ex-date">${esc(fmtD(e.date)) || '<span class="faint">—</span>'}</span>
+            <span class="ex-t" title="${esc(e.exam || e.solution)}">${esc(e.title)}<span class="faint ex-src">${esc([e.edition, src[e.source] || ''].filter(Boolean).join(' · '))}</span></span>
+            <span class="ex-btns">${e.exam ? btn(e.exam, 'Testo', '') : '<span class="faint ex-none">testo non trovato</span>'}${e.withSolution ? '<span class="pill ok">con soluzioni</span>' : e.solution ? btn(e.solution, `${icon('check')} Soluzione`, 'ok') : '<span class="faint ex-none">senza soluzione</span>'}</span></div>`).join('')}</div>`
+            : `<p class="faint ex-empty">${busy ? 'Ricerca in corso…' : checked ? `Nessun tema d'esame trovato${eds.length ? ` nelle ${eds.length} edizioni passate (${eds.filter(e => e.accessible).length} accessibili con il tuo account)` : ': nessuna edizione passata del corso su WeBeep'}.` : 'Premi «Cerca ora».'}</p>`}</details>`;
+    const d = $('details', el);
+    d.ontoggle = () => { try { localStorage.setItem('exOpen:' + c.id, d.open ? '1' : '0'); } catch (e) { } };
+    $$('[data-open-f]', el).forEach(b => b.onclick = e => { e.preventDefault(); guard(() => api.open(c.id, 'materials', b.dataset.openF)); });
+    $$('[data-exdone]', el).forEach(i => i.onchange = () => guard(async () => { await toggleDone(c, 'doneExams', i.dataset.exdone); drawExams(c, el, ex); }));
+    $('#ex-run', el).onclick = e => { e.preventDefault(); guard(async () => { await api.exams.run(c.id); toast('Cerco i temi d\'esame: lo vedi in Attività'); }); };
+    $('#ex-more', el).onclick = e => { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); showMenu(r.right - 280, r.bottom + 6, [
+        ['Apri la cartella dei temi d\'esame', () => api.open(c.id, 'materials', "Temi d'esame")],
+        ...(eds.length ? [['Edizioni passate trovate…', () => { const m = modal(`<h2>Edizioni passate</h2><div class="kvs">${eds.map(x => `<div class="kv"><span>${esc(x.name)}</span><span class="${x.accessible ? '' : 'faint'}">${x.accessible ? `${x.candidates} file d'esame${x.access === 'temp' ? ' · iscrizione temporanea' : ''}` : x.access === 'key' ? 'serve la chiave d\'iscrizione' : 'non accessibile'}</span></div>`).join('')}</div><p class="faint">${c.pastExamsEnrol === false ? 'L\'iscrizione temporanea è disattivata: si leggono solo le edizioni a cui sei già iscritto.' : 'Quando un\'edizione passata permette l\'iscrizione spontanea senza chiave, PoliDesk ti iscrive, scarica i temi d\'esame e ti disiscrive subito. Le altre restano non accessibili.'}</p><div class="foot"><button class="primary" id="ed-ok">Chiudi</button></div>`); $('#ed-ok', m.el).onclick = m.close; }]] : []),
+        [c.pastExamsEnrol === false ? 'Attiva l\'iscrizione temporanea alle edizioni passate' : 'Disattiva l\'iscrizione temporanea alle edizioni passate', () => guard(async () => { const on = c.pastExamsEnrol === false; await api.updateCourse(c.id, { pastExamsEnrol: on }); toast(on ? 'PoliDesk si iscriverà per un momento alle edizioni passate con iscrizione spontanea' : 'Solo le edizioni a cui sei già iscritto'); $('#view').dataset.view = ''; await refresh(); })],
+        '-',
+        ['Disattiva la ricerca automatica', () => guard(async () => { await api.updateCourse(c.id, { pastExams: false }); toast('Ricerca automatica dei temi d\'esame disattivata'); $('#view').dataset.view = ''; await refresh(); })],
+    ]); };
 }
 
 function tabNotes(c, el) {
@@ -459,6 +584,7 @@ function tabCourseSettings(c, el) {
     <div class="group"><h3>Sincronizzazione</h3>
         ${field('Sync automatica', 'Includi il corso nella sync all\'avvio e periodica', sw('cs-auto', c.autoSync !== false))}
         ${field('Scarica il materiale', 'Slide, PDF e cartelle del corso in materiale/', sw('cs-mat', !!c.materials))}
+        ${field('Temi d\'esame degli anni passati', 'Cerca il corso negli anni precedenti su WeBeep e scarica i temi d\'esame con le soluzioni, senza doppioni', sw('cs-exams', !!c.pastExams))}
         ${field('Guarda le lezioni in streaming', 'Non scarica i video: li guardi online dalla pagina della lezione. Scarica solo l\'audio, per trascrizione e appunti AI. Da ogni lezione puoi comunque scaricare il video intero.', sw('cs-stream', !!c.streamOnly))}
         <div id="cs-free"></div>
         ${field('Link extra', 'Uno per riga: archivi RecMan, link WebEx, mp4 o YouTube non trovati automaticamente', `<textarea id="cs-extra" rows="3">${esc((c.extraUrls || []).join('\n'))}</textarea>`)}
@@ -480,7 +606,7 @@ function tabCourseSettings(c, el) {
     $('#cs-save', el).onclick = () => guard(async () => {
         const patch = {
             name: $('#cs-name', el).value, input: $('#cs-input', el).value, dir: $('#cs-dir', el).value, language: $('#cs-lang', el).value,
-            autoSync: $('#cs-auto', el).checked, materials: $('#cs-mat', el).checked, videoPassword: $('#cs-pwd', el).value, streamOnly: $('#cs-stream', el).checked,
+            autoSync: $('#cs-auto', el).checked, materials: $('#cs-mat', el).checked, pastExams: $('#cs-exams', el).checked, videoPassword: $('#cs-pwd', el).value, streamOnly: $('#cs-stream', el).checked,
             extraUrls: $('#cs-extra', el).value.split('\n').map(s => s.trim()).filter(Boolean),
         };
         if (patch.input !== c.input) patch.webeepId = null;
@@ -519,12 +645,17 @@ function viewRecording(v) {
     const sib = lessonSiblings(c), idx = sib.findIndex(x => x.key === r.key);
     const prev = sib[idx - 1], next = sib[idx + 1];
     const goLesson = x => x && go({ name: 'recording', courseId: c.id, key: x.key, back: route.back });
+    if (POPOUT) document.title = `${r.displayTitle || r.file} — ${cname(c)}`;
+    setTheater(!POPOUT && localStorage.getItem('theater') === '1');
     v.innerHTML = `<div class="page wide rec-page">
         <div class="rec-top">
-            <button class="ghost small back" id="r-back" title="Torna al corso">${icon('chevLeft')} ${esc(cname(c))}</button><span class="grow"></span>
+            ${POPOUT ? `<span class="faint pop-course">${esc(cname(c))}</span>` : `<button class="ghost small back" id="r-back" title="Torna al corso">${icon('chevLeft')} ${esc(cname(c))}</button>`}<span class="grow"></span>
+            ${POPOUT ? `<button class="small ghost" id="r-popin" title="Riporta la lezione nella finestra principale">${icon('popin')} Riporta nella finestra principale</button>`
+                : `<button class="small ghost" id="r-popout" title="Modalità appunti: sposta video e trascrizione in una finestra separata e usa questa per appunti e corso">${icon('popout')} Modalità appunti</button>`}
             ${idx >= 0 ? `<span class="faint">Lezione ${idx + 1} di ${sib.length}</span>` : ''}
             <button class="ghost icon" id="r-prev" ${prev ? '' : 'disabled'} title="${prev ? 'Lezione precedente: ' + esc(prev.displayTitle || '') : 'Nessuna lezione precedente'} ( [ )" aria-label="Lezione precedente">${icon('chevLeft')}</button>
             <button class="ghost icon" id="r-next" ${next ? '' : 'disabled'} title="${next ? 'Lezione successiva: ' + esc(next.displayTitle || '') : 'Nessuna lezione successiva'} ( ] )" aria-label="Lezione successiva">${icon('chevRight')}</button>
+            <button class="small ${doneSet(c, 'doneLessons').has(r.key) ? 'lc-done on' : 'ghost'}" id="r-done" title="Segna la lezione come fatta / da fare">${icon('check')} ${doneSet(c, 'doneLessons').has(r.key) ? 'Fatta' : 'Segna come fatta'}</button>
             <button class="ghost icon" id="r-more" title="Altre azioni" aria-label="Altre azioni">${icon('more')}</button>
         </div>
         <div class="page-head"><div><h1>${esc(r.displayTitle || r.file)}</h1><div class="sub">${[r.isoDate && new Date(r.isoDate).toLocaleString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }), r.teacher, r.type, r.duration].filter(Boolean).map(esc).join(' · ')}</div></div></div>
@@ -532,7 +663,22 @@ function viewRecording(v) {
             <div class="rec-main"><div class="player" id="player"><div class="empty">Caricamento…</div></div><div class="info-card" id="r-info"></div><section class="study" id="r-study"></section></div>
             <div class="side-panel"><div class="tabs" id="r-tabs">${[['testo', 'Trascrizione'], ['appunti', 'Appunti']].map(([k, l]) => `<button data-s="${k}" class="${sideTab() === k ? 'active' : ''}">${l}</button>`).join('')}</div><div class="body" id="r-side"></div></div>
         </div></div>`;
-    $('#r-back', v).onclick = () => go({ name: 'course', courseId: c.id, tab: route.back || 'lezioni' });
+    $('#r-done', v).onclick = () => guard(async () => {
+        const on = await toggleDone(c, 'doneLessons', r.key), b = $('#r-done', v);
+        b.className = 'small ' + (on ? 'lc-done on' : 'ghost'); b.innerHTML = `${icon('check')} ${on ? 'Fatta' : 'Segna come fatta'}`;
+        toast(on ? 'Lezione segnata come fatta' : 'Lezione segnata come da fare');
+    });
+    if ($('#r-back', v)) $('#r-back', v).onclick = () => go({ name: 'course', courseId: c.id, tab: route.back || 'lezioni' });
+    const where = () => ({ courseId: c.id, key: r.key, t: player ? player.currentTime : Number(localStorage.getItem('pos:' + r.key) || 0), playing: !!(player && !player.paused), title: r.displayTitle || r.file });
+    if ($('#r-popout', v)) $('#r-popout', v).onclick = () => guard(async () => {
+        const w = where();
+        if (player) { localStorage.setItem('pos:' + r.key, w.t); player.pause(); }
+        if (document.fullscreenElement) await document.exitFullscreen().catch(() => { });
+        await api.lesson.popout(w);
+        go({ name: 'course', courseId: c.id, tab: route.back || 'lezioni' });
+        toast('Lezione in una finestra separata: qui puoi prendere appunti');
+    });
+    if ($('#r-popin', v)) $('#r-popin', v).onclick = () => guard(async () => { const w = where(); if (player) { localStorage.setItem('pos:' + r.key, w.t); player.pause(); } await api.lesson.popin(w); });
     $('#r-prev', v).onclick = () => goLesson(prev);
     $('#r-next', v).onclick = () => goLesson(next);
     $('#r-more', v).onclick = e => { const b = e.currentTarget.getBoundingClientRect(); showMenu(b.right - 260, b.bottom + 6, lessonMenu(c, r)); };
@@ -624,8 +770,11 @@ function drawPlayer(c, r, stream) {
             <select class="speed" id="p-speed" title="Velocità (< >)" aria-label="Velocità">${speeds.map(s => `<option value="${s}" ${s === 1 ? 'selected' : ''}>${s}×</option>`).join('')}</select>
             <button id="p-skip" class="icon" title="Salta i silenzi (usa i tempi della trascrizione)" aria-label="Salta i silenzi">${icon('skip')}</button>
             ${stream ? `<button id="p-dl" class="icon" title="Scarica il video intero sul computer" aria-label="Scarica il video">${icon('download')}</button>` : ''}
+            <button id="p-cc" class="icon" title="Trascrizione sotto il video a schermo intero (C)" aria-label="Trascrizione a schermo intero">${icon('captions')}</button>
+            ${POPOUT ? '' : `<button id="p-theater" class="icon" title="Modalità cinema (T)" aria-label="Modalità cinema">${icon('theater')}</button>`}
             <button id="p-full" class="icon" title="Schermo intero (F)" aria-label="Schermo intero">${icon('expand')}</button>
         </div>`;
+    $('#vid', box).insertAdjacentHTML('afterend', '<div class="fs-tr" id="p-fstr" aria-live="off"></div>');
     if (stream) {
         $('#p-dl').onclick = () => guard(async () => { await api.downloadVideo(c.id, r.key); toast('Download del video avviato: lo trovi in Attività'); });
         playStream($('#vid'), stream.sources, () => {
@@ -639,7 +788,10 @@ function drawPlayer(c, r, stream) {
     const saved = Number(localStorage.getItem('speed') || 1); vid.playbackRate = saved; $('#p-speed').value = String(saved);
     const fromSearch = route.t != null ? Number(route.t) : null;   // opened from search: jump to that minute
     const pos = fromSearch != null ? fromSearch : Number(localStorage.getItem('pos:' + r.key) || 0);
-    vid.addEventListener('loadedmetadata', () => { if ((fromSearch != null || pos > 5) && pos < vid.duration - 5) vid.currentTime = pos; });
+    vid.addEventListener('loadedmetadata', () => {
+        if ((fromSearch != null || pos > 5) && pos < vid.duration - 5) vid.currentTime = pos;
+        if (route.autoplay) { route.autoplay = false; vid.play().catch(() => { }); }
+    });
     vid.addEventListener('ratechange', () => { $('#p-speed').value = String(vid.playbackRate); });
     $('#p-play').onclick = () => vid.paused ? vid.play() : vid.pause();
     vid.onclick = () => $('#p-play').click();
@@ -650,7 +802,22 @@ function drawPlayer(c, r, stream) {
     $('#p-fwd').onclick = () => vid.currentTime += 10;
     $('#p-speed').onchange = e => { vid.playbackRate = +e.target.value; localStorage.setItem('speed', e.target.value); };
     $('#p-full').onclick = () => (document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen()).catch(e => toast('Schermo intero non disponibile: ' + e.message));
-    box.onfullscreenchange = () => { const on = document.fullscreenElement === box; $('#p-full').title = on ? 'Esci dallo schermo intero (F / Esc)' : 'Schermo intero (F)'; $('#p-full').innerHTML = icon(on ? 'shrink' : 'expand'); };
+    // full screen: video on top, the transcript below it (button C)
+    const fsText = () => localStorage.getItem('fsText') !== '0';
+    const updFs = () => {
+        const on = document.fullscreenElement === box;
+        box.classList.toggle('fs-text', on && fsText());
+        $('#p-cc').classList.toggle('on', fsText());
+        if (on && fsText()) { drawFsTranscript(); highlightSegment(vid.currentTime, true); }
+    };
+    $('#p-cc').onclick = () => { localStorage.setItem('fsText', fsText() ? '0' : '1'); updFs(); if (!document.fullscreenElement) toast(fsText() ? 'A schermo intero la trascrizione compare sotto il video' : 'Trascrizione a schermo intero disattivata'); };
+    updFs();
+    if ($('#p-theater')) {
+        const updTh = () => $('#p-theater').classList.toggle('on', document.documentElement.classList.contains('theater'));
+        $('#p-theater').onclick = () => { const on = !document.documentElement.classList.contains('theater'); setTheater(on); localStorage.setItem('theater', on ? '1' : '0'); updTh(); };
+        updTh();
+    }
+    box.onfullscreenchange = () => { const on = document.fullscreenElement === box; $('#p-full').title = on ? 'Esci dallo schermo intero (F / Esc)' : 'Schermo intero (F)'; $('#p-full').innerHTML = icon(on ? 'shrink' : 'expand'); updFs(); };
     let skip = localStorage.getItem('skipSilence') === '1';
     const skipBtn = $('#p-skip');
     const updSkip = () => skipBtn.classList.toggle('on', skip && !!recData.segments);
@@ -720,16 +887,37 @@ function playStream(vid, sources, failed) {
     next();
 }
 
-function highlightSegment(t) {
-    const lines = $$('.seg-line');
-    if (!lines.length) return;
+function highlightSegment(t, force) {
+    // side panel
+    const lines = $$('#t-body .seg-line');
     let cur = null;
     for (const l of lines) { if (+l.dataset.s <= t) cur = l; else break; }
     if (cur && !cur.classList.contains('cur')) {
-        $$('.seg-line.cur').forEach(x => x.classList.remove('cur'));
+        $$('#t-body .seg-line.cur').forEach(x => x.classList.remove('cur'));
         cur.classList.add('cur');
-        if ($('#r-follow') && $('#r-follow').checked) cur.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        // scroll only the transcript panel, never the page (cinema mode puts the panel under the video)
+        const body = $('#r-side');
+        if (body && $('#r-follow') && $('#r-follow').checked && !document.fullscreenElement) body.scrollTo({ top: cur.offsetTop - body.clientHeight / 2 + cur.offsetHeight / 2, behavior: 'smooth' });
     }
+    // transcript under the full-screen video: always follows, scrolling only its own box
+    const box = $('#player.fs-text #p-fstr');
+    if (!box) return;
+    let fc = null;
+    for (const l of box.children) { if (+l.dataset.s <= t) fc = l; else break; }
+    if (fc && (force || !fc.classList.contains('cur'))) {
+        $$('.fs-line.cur', box).forEach(x => x.classList.remove('cur'));
+        fc.classList.add('cur');
+        box.scrollTo({ top: fc.offsetTop - box.clientHeight / 2 + fc.offsetHeight / 2, behavior: force ? 'auto' : 'smooth' });
+    }
+}
+function drawFsTranscript() {
+    const box = $('#p-fstr'); if (!box || !recData) return;
+    if (box.dataset.for === route.key && box.childElementCount) return;
+    box.dataset.for = route.key;
+    if (recData.segments) {
+        box.innerHTML = recData.segments.map(s => `<div class="fs-line" data-s="${s.start}"><span class="ts">${fmtT(s.start)}</span><span>${esc(s.text)}</span></div>`).join('');
+        $$('.fs-line', box).forEach(l => l.onclick = () => { if (player) player.currentTime = +l.dataset.s; });
+    } else box.innerHTML = recData.text ? `<div class="fs-plain">${esc(recData.text).replace(/\n/g, '<br>')}</div>` : '<div class="fs-plain faint">Questa lezione non è ancora stata trascritta.</div>';
 }
 
 /** Transcript as clean prose, without timestamps: segments joined into paragraphs at pauses. */
@@ -974,6 +1162,8 @@ document.addEventListener('keydown', e => {
     else if (e.key === 'ArrowLeft') player.currentTime -= 10;
     else if (e.key === 'ArrowRight') player.currentTime += 10;
     else if (e.key.toLowerCase() === 'f') $('#p-full') && $('#p-full').click();
+    else if (e.key.toLowerCase() === 't' && !document.fullscreenElement) $('#p-theater') && $('#p-theater').click();
+    else if (e.key.toLowerCase() === 'c') $('#p-cc') && $('#p-cc').click();
     else if (e.key === '>' || e.key === '.') player.playbackRate = Math.min(3, player.playbackRate + 0.25);
     else if (e.key === '<' || e.key === ',') player.playbackRate = Math.max(0.5, player.playbackRate - 0.25);
 });
@@ -1347,6 +1537,8 @@ api.on(e => {
         case 'setup-log': { const l = $('#su-log'); if (l) { l.textContent += e.line + '\n'; l.scrollTop = 1e9; } break; }
         case 'refresh': softRefresh(); break;
         case 'pn-progress': case 'pn-done': if (window.PnUI) PnUI.onEvent(e); break;
+        case 'lesson-popin': go({ name: 'recording', courseId: e.courseId, key: e.key, t: e.t, autoplay: e.playing }); break;
+        case 'lesson-go': if (e.route) go(e.route); break;
         case 'teacher-choice': refresh().then(() => { const c = course(e.course); if (c) { teacherAsked.delete(c.id); askTeachers(c, { auto: true }); } }); break;
     }
 });

@@ -122,6 +122,9 @@ function commands() {
         { id: 'rec.sum', label: 'Genera sommario con l\'AI', icon: 'sparkles', kw: 'riassunto', run: la('sum') },
         { id: 'rec.tr', label: 'Trascrivi la lezione', icon: 'mic', kw: 'whisper', run: la('tr') },
         { id: 'rec.full', label: 'Schermo intero', icon: 'expand', keys: 'f', kw: 'fullscreen', run: clickIf('#p-full') },
+        { id: 'rec.theater', label: 'Modalità cinema', icon: 'theater', keys: 't', kw: 'theater teatro grande', run: clickIf('#p-theater') },
+        { id: 'rec.cc', label: 'Trascrizione sotto il video a schermo intero', icon: 'captions', keys: 'c', kw: 'sottotitoli testo fullscreen', run: clickIf('#p-cc') },
+        { id: 'rec.popout', label: 'Modalità appunti (lezione in una finestra separata)', icon: 'popout', kw: 'finestra separata appunti popout', run: clickIf('#r-popout, #r-popin') },
         { id: 'rec.ext', label: 'Apri il video con l\'app di sistema', icon: 'external', kw: 'vlc quicktime', run: la('ext') },
         { id: 'rec.finder', label: 'Mostra il video nella cartella', icon: 'folder', kw: 'finder', run: la('finder') },
         { id: 'rec.info', label: 'Dettagli del file', icon: 'info', kw: 'info', run: la('details') });
@@ -274,7 +277,7 @@ function showShortcuts() {
         ['Vai a', [['mod+alt+1', 'Dashboard'], ['mod+alt+2', 'Appunti'], ['mod+alt+3', 'Calendario'], ['mod+alt+4', 'Aule libere'], ['mod+alt+5', 'Da fare'], ['mod+shift+f', 'Cerca nelle lezioni'], ['mod+,', 'Impostazioni'], ['mod+1', 'Corso 1…9 (anche g poi numero)'], ['g d', 'Dashboard (anche g n, g c, g a, g t, g s, g i)']]],
         ['Azioni', [['mod+n', 'Nuovo appunto'], ['mod+shift+s', 'Sincronizza tutti i corsi'], ['mod+shift+t', 'Focus: avvia / pausa'], ['ctrl+tab', 'Scheda successiva del corso'], ['ctrl+shift+tab', 'Scheda precedente']]],
         ['Corso', [['j', 'Lezione successiva nell\'elenco'], ['k', 'Lezione precedente nell\'elenco'], ['enter', 'Apri la lezione']]],
-        ['Lezione', [['space', 'Play / pausa'], ['[', 'Lezione precedente'], [']', 'Lezione successiva'], ['left', '−10 s'], ['right', '+10 s'], ['f', 'Schermo intero'], ['.', 'Più veloce'], [',', 'Più lento']]],
+        ['Lezione', [['space', 'Play / pausa'], ['[', 'Lezione precedente'], [']', 'Lezione successiva'], ['left', '−10 s'], ['right', '+10 s'], ['f', 'Schermo intero'], ['t', 'Modalità cinema'], ['c', 'Trascrizione a schermo intero'], ['.', 'Più veloce'], [',', 'Più lento']]],
         ['Appunti', [['mod+s', 'Salva'], ['mod+enter', 'Compila (LaTeX, Typst)'], ['mod+shift+e', 'Elenco file']]],
         ['Palette', [['>', 'Solo comandi'], ['@', 'Solo corsi'], ['#', 'Solo appunti'], ['?', 'Domanda all\'AI'], ['mod+enter', 'Chiedi all\'AI']]],
     ];

@@ -20,7 +20,10 @@ try {
 } catch (e) { }
 
 let win = null;
-const send = evt => { if (win && !win.isDestroyed()) win.webContents.send('evt', evt); };
+let lessonWin = null;                           // "Modalità appunti": the lesson in its own window
+const alive = w => w && !w.isDestroyed();
+const send = evt => { for (const w of [win, lessonWin]) if (alive(w)) w.webContents.send('evt', evt); };
+const sendMain = evt => { if (alive(win)) win.webContents.send('evt', evt); };
 const notify = body => { if (Notification.isSupported()) new Notification({ title: 'PoliDesk', body }).show(); };
 
 // ---------- polideskd ----------
@@ -156,6 +159,44 @@ handle('cal:importIcs', async src => {
     return daemon.request('cal:importIcs', src);
 });
 
+// ---------- "Modalità appunti": the lesson (player + transcript) in a second window ----------
+// The main window stays free for notes, the course page and the rest of the app.
+const lessonQuery = o => ({ popout: '1', course: String(o.courseId || ''), key: String(o.key || ''), t: String(Math.floor(o.t || 0)), play: o.playing ? '1' : '' });
+handle('lesson:popout', async o => {
+    if (alive(lessonWin)) {
+        lessonWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: lessonQuery(o) });
+        lessonWin.show(); lessonWin.focus();
+        return true;
+    }
+    const b = alive(win) ? win.getBounds() : { x: 80, y: 80, width: 1320, height: 860 };
+    lessonWin = new BrowserWindow({
+        width: 900, height: 760, minWidth: 520, minHeight: 420,
+        x: b.x + Math.max(0, b.width - 900 - 24), y: b.y + 40,
+        title: o.title ? `${o.title} — PoliDesk` : 'Lezione — PoliDesk',
+        backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f5f5f7',
+        webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, plugins: true },
+    });
+    lessonWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+    lessonWin.on('closed', () => { lessonWin = null; sendMain({ type: 'lesson-window', open: false }); });
+    lessonWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: lessonQuery(o) });
+    sendMain({ type: 'lesson-window', open: true, courseId: o.courseId, key: o.key });
+    return true;
+});
+// back into the main window, at the same point of the video
+handle('lesson:popin', async o => {
+    sendMain({ type: 'lesson-popin', courseId: o.courseId, key: o.key, t: o.t || 0, playing: !!o.playing });
+    if (alive(win)) { win.show(); win.focus(); }
+    if (alive(lessonWin)) lessonWin.close();
+    return true;
+});
+// from the lesson window: open a page (notes, course…) in the main window
+handle('lesson:mainGo', async route => {
+    sendMain({ type: 'lesson-go', route });
+    if (alive(win)) { win.show(); win.focus(); }
+    return true;
+});
+handle('lesson:isOpen', async () => alive(lessonWin));
+
 /** Markdown → PDF via an offscreen window (same KaTeX CSS as the preview). */
 async function mdToPdf(html, out) {
     const w = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
@@ -229,6 +270,7 @@ async function createWindow() {
     win.webContents.session.setPermissionCheckHandler((wc, perm) => allowed.has(perm));
     win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    win.on('closed', () => { if (alive(lessonWin)) lessonWin.close(); });
     win.on('focus', () => daemon.request('cloud:autopull').catch(() => { }));
     win.webContents.on('console-message', e => { if (e.level === 'warning' || e.level === 'error') console.error('[renderer]', e.message); });
     win.webContents.once('did-finish-load', () => { if (!process.env.POLIDESK_SMOKE) daemon.request('app:ready').catch(() => { }); });

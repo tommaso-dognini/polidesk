@@ -689,6 +689,21 @@ pub fn local_files(course_dir: &Path) -> Vec<String> {
     sidecar(course_dir).as_object().map(|o| o.keys().map(|k| format!("{LOCAL_DIR}/{k}")).collect()).unwrap_or_default()
 }
 
+/// Forget downloaded files (deleted by the student): `rels` are relative to materiale/ (files or folders).
+pub fn forget(course_dir: &Path, rels: &[String]) -> Result<()> {
+    let mut side = sidecar(course_dir);
+    let Some(o) = side.as_object_mut() else { return Ok(()) };
+    let before = o.len();
+    o.retain(|k, _| {
+        let full = format!("{LOCAL_DIR}/{k}");
+        !rels.iter().any(|r| full == *r || full.starts_with(&format!("{}/", r.trim_end_matches('/'))) || r == LOCAL_DIR)
+    });
+    if o.len() != before {
+        util::write_json(&local_root(course_dir).join(SIDECAR), &side)?;
+    }
+    Ok(())
+}
+
 /// Files of the linked folders, with their local state (`new`, `local`, `updated`).
 pub async fn course_tree(course_dir: &Path, links: &[Value]) -> Result<Value> {
     let side = sidecar(course_dir);

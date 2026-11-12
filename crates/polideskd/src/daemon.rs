@@ -736,6 +736,12 @@ impl Daemon {
         }
     }
 
+    /// Sync one course with options (e.g. only material, or "search past exams now").
+    pub fn enqueue_sync_with(self: &Arc<Self>, id: &str, opts: Value) {
+        self.sync.lock().unwrap().opts.insert(id.to_string(), opts);
+        self.enqueue_sync(Some(vec![id.to_string()]));
+    }
+
     pub fn enqueue_sync(self: &Arc<Self>, ids: Option<Vec<String>>) {
         let all: Vec<Value> = config::courses(&config::load()).to_vec();
         let wanted: Vec<String> = match ids.filter(|v| !v.is_empty()) {
@@ -877,6 +883,7 @@ impl Daemon {
             dry_run: util::b(&o, "dryRun"),
             keys: o.get("keys").filter(|k| k.is_array()).map(|k| util::str_list(Some(k))),
             full_video: util::b(&o, "fullVideo"),
+            exams: util::b(&o, "exams"),
         };
         let d = self.clone();
         let (cid, course) = (id.clone(), c.clone());

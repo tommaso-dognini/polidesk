@@ -2,7 +2,7 @@
 use crate::browser::Session;
 use crate::downloader::{self, Headers};
 use crate::library as lib;
-use crate::{materials, recman, tools, util, webeep, webex, Emit};
+use crate::{exams, materials, recman, tools, util, webeep, webex, Emit};
 use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use serde_json::{json, Value};
@@ -23,10 +23,12 @@ pub struct Opts {
     pub keys: Option<Vec<String>>,
     /// download the full video even when the course is "streamOnly"
     pub full_video: bool,
+    /// search past exams now, even if the last search is recent ("Cerca ora")
+    pub exams: bool,
 }
 impl Default for Opts {
     fn default() -> Self {
-        Opts { parallel: 3, dry_run: false, limit: None, only_materials: false, materials: None, stop: Arc::new(AtomicBool::new(false)), control: Default::default(), keys: None, full_video: false }
+        Opts { parallel: 3, dry_run: false, limit: None, only_materials: false, materials: None, stop: Arc::new(AtomicBool::new(false)), control: Default::default(), keys: None, full_video: false, exams: false }
     }
 }
 
@@ -325,6 +327,13 @@ pub async fn sync_course(s: &Arc<Session>, course: &Value, opts: &Opts, emit: Em
                 ctx.save().await;
             }
             Err(e) => ctx.log(format!("  ✗ Materiale: {e}")),
+        }
+    }
+    // past exams (TdE) of earlier editions — only when enabled for this course
+    if course["pastExams"].as_bool() == Some(true) && opts.keys.is_none() && !opts.dry_run && !should_stop() && (opts.exams || exams::due(&dir)) {
+        let m = ctx.manifest.lock().await.clone();
+        if let Err(e) = exams::sync_exams(s, course, &dir, &m, &log_fn, &should_stop).await {
+            ctx.log(format!("  ✗ Temi d'esame: {e}"));
         }
     }
     let out = |downloaded: usize, failed: usize, mat: Value| json!({ "total": found.len(), "downloaded": downloaded, "failed": failed, "materials": mat, "webeepId": wc["id"], "name": name });

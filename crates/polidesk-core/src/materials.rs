@@ -85,7 +85,7 @@ fn section_dir(f: &Value) -> String {
     lib::sanitize(&format!("{n:02} - {}", util::s(f, "section")), 80)
 }
 
-fn file_name_from(cd: &str, url: &reqwest::Url) -> String {
+pub(crate) fn file_name_from(cd: &str, url: &reqwest::Url) -> String {
     static RX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?"#).unwrap());
     let raw = RX.captures(cd).and_then(|m| m.get(1).or(m.get(2)).map(|x| x.as_str().to_string())).unwrap_or_else(|| url.path_segments().and_then(|mut s| s.next_back()).unwrap_or("file").to_string());
     percent_encoding::percent_decode_str(&raw).decode_utf8_lossy().into_owned()
@@ -112,6 +112,11 @@ pub async fn sync_materials(s: &Session, course_dir: &Path, manifest: &mut Value
         }
         let furl = util::s(f, "url").to_string();
         let known = manifest["materials"].get(&furl).cloned();
+        // deleted by the student in the app: never downloaded again
+        if known.as_ref().map(|k| util::b(k, "deleted")).unwrap_or(false) {
+            skipped += 1;
+            continue;
+        }
         let r: Result<Option<String>> = async {
             // resolve the real file name (resources redirect to pluginfile)
             let head = net::client().head(&furl).header("Cookie", &cookie).send().await?;

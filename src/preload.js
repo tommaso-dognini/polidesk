@@ -112,5 +112,14 @@ contextBridge.exposeInMainWorld('polidesk', {
         index: force => invoke('pn:index', { force }), match: (courseId, q) => invoke('pn:match', { courseId, q }), tree: courseId => invoke('pn:tree', { courseId }),
         download: (courseId, files) => invoke('pn:download', { courseId, files }), status: courseId => invoke('pn:status', { courseId }), cancel: courseId => invoke('pn:cancel', { courseId }),
     },
+    removeMaterials: (courseId, paths) => invoke('materials:remove', { courseId, paths: [].concat(paths) }),
+    exams: { run: courseId => invoke('exams:run', { courseId }) },
+    /** "Modalità appunti": the lesson (player + transcript) in a window of its own */
+    lesson: {
+        popout: o => invoke('lesson:popout', o),
+        popin: o => invoke('lesson:popin', o),
+        mainGo: route => invoke('lesson:mainGo', route),
+        isOpen: () => invoke('lesson:isOpen'),
+    },
     on: cb => ipcRenderer.on('evt', (_, e) => cb(e)),
 });
