@@ -1,30 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- PoliDesk: a study desk — a screen with a lesson (play) and its notes (lines), a stack of books, an AI spark -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a8bff"/><stop offset="1" stop-color="#5b3fd9"/></linearGradient>
-    <linearGradient id="hl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
-    <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#1b1060" flood-opacity=".28"/></filter>
-  </defs>
-  <rect x="80" y="80" width="864" height="864" rx="200" fill="url(#bg)"/>
-  <rect x="80" y="80" width="864" height="864" rx="200" fill="url(#hl)"/>
-  <g filter="url(#sh)">
-    <!-- screen -->
-    <rect x="214" y="300" width="440" height="300" rx="40" fill="#fff"/>
-    <path d="M296 398 L380 450 L296 502 Z" fill="#4a63ee" stroke="#4a63ee" stroke-width="16" stroke-linejoin="round"/>
-    <rect x="424" y="398" width="164" height="24" rx="12" fill="#4a63ee" opacity=".9"/>
-    <rect x="424" y="440" width="128" height="24" rx="12" fill="#4a63ee" opacity=".55"/>
-    <rect x="424" y="482" width="146" height="24" rx="12" fill="#4a63ee" opacity=".35"/>
-    <rect x="408" y="600" width="52" height="60" fill="#fff" opacity=".92"/>
-    <!-- books -->
-    <rect x="690" y="586" width="128" height="74" rx="14" fill="#ffd84d"/>
-    <rect x="704" y="512" width="104" height="74" rx="14" fill="#ff8a5c"/>
-    <rect x="696" y="438" width="116" height="74" rx="14" fill="#fff" opacity=".95"/>
-    <rect x="690" y="610" width="128" height="10" fill="#e0a800"/><rect x="704" y="536" width="104" height="10" fill="#e06a3e"/><rect x="696" y="462" width="116" height="10" fill="#c9cdf6"/>
-    <!-- desk -->
-    <rect x="170" y="660" width="684" height="56" rx="28" fill="#fff"/>
-    <rect x="226" y="716" width="48" height="110" rx="24" fill="#fff" opacity=".8"/>
-    <rect x="750" y="716" width="48" height="110" rx="24" fill="#fff" opacity=".8"/>
+  <!-- PoliDesk: the lesson on screen (play + notes) and a pencil to write them. Flat, black and white, thick outlines. -->
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="#fafafa"/>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="none" stroke="#111" stroke-opacity=".12" stroke-width="4"/>
+  <g stroke="#111" stroke-width="28" stroke-linejoin="round" stroke-linecap="round">
+    <!-- stand -->
+    <path d="M500 640 V736 M410 742 H590" fill="none" stroke-width="32"/>
+    <!-- the lesson screen -->
+    <g transform="rotate(-4 500 470)">
+      <rect x="226" y="276" width="548" height="378" rx="30" fill="#f1ede4"/>
+      <!-- play -->
+      <path d="M300 396 L414 462 L300 528 Z" fill="#111"/>
+      <!-- notes -->
+      <path d="M478 386 H684 M478 446 H648 M478 506 H684 M300 584 H580" fill="none" stroke-width="30"/>
+    </g>
+    <!-- pencil -->
+    <g transform="rotate(40 700 640)">
+      <rect x="660" y="430" width="80" height="300" rx="8" fill="#f1ede4"/>
+      <rect x="660" y="430" width="80" height="62" rx="8" fill="#111"/>
+      <path d="M660 730 L700 816 L740 730 Z" fill="#f1ede4"/>
+      <path d="M686 786 L700 816 L714 786 Z" fill="#111"/>
+    </g>
   </g>
-  <!-- AI spark -->
-  <path d="M760 186 C769 238 786 255 838 264 C786 273 769 290 760 342 C751 290 734 273 682 264 C734 255 751 238 760 186 Z" fill="#ffd84d"/>
 </svg>

@@ -1,3 +1,5 @@
+<p align="center"><img src="build/icon.png" width="128" alt="Icona di PoliDesk"></p>
+
 # PoliDesk
 
 **Le lezioni del Politecnico di Milano, sul tuo computer: scaricate, trascritte e pronte da studiare.**
@@ -12,6 +14,8 @@ calendario, aule libere e Pomodoro, tutto in un'unica app.
 > **App non ufficiale**, non affiliata né approvata dal Politecnico di Milano. Usa le registrazioni solo per
 > studio personale e nel rispetto del regolamento di Ateneo. Vedi [Privacy e uso responsabile](PRIVACY.md).
 
+<p align="center"><img src="docs/screenshots/lezione.png" alt="Pagina della lezione: video, trascrizione sincronizzata e sommario"></p>
+
 ---
 
 ## Cosa fa
@@ -21,13 +25,25 @@ calendario, aule libere e Pomodoro, tutto in un'unica app.
 | **📥 Registrazioni** | Trova le lezioni ovunque siano nel corso WeBeep (archivi RecMan, link WebEx, annunci, mp4, YouTube) e le scarica in parallelo. Sincronizzazione automatica all'avvio, con coda di priorità tra i corsi. |
 | **👥 Lezioni parallele** | Se un corso ha le registrazioni di più docenti, ti chiede quale segui prima di scaricarle (anche più di uno). |
 | **🎙 Trascrizione locale** | Whisper large-v3-turbo o Parakeet, configurati in automatico per il tuo hardware (Apple Silicon, NVIDIA, solo CPU). Toglie ehm, mmm, ripetizioni e frasi inventate. L'audio non lascia il computer. |
-| **▶ Pagina della lezione** | Player interno (velocità fino a 3×, salto dei silenzi, ripresa automatica), trascrizione sincronizzata, cercabile e copiabile. |
+| **▶ Pagina della lezione** | Player interno (velocità fino a 3×, salto dei silenzi, ripresa automatica), trascrizione sincronizzata, cercabile e copiabile, anche sotto il video a schermo intero. Modalità cinema e **modalità appunti** (la lezione in una finestra separata). |
 | **✨ Studia con l'AI** | Per ogni lezione: sommario, appunti, riassunto, spiegazioni, **flashcard interattive**, **domande d'esame**, chat sulla lezione. Usa Antigravity CLI, Claude Code o GitHub Copilot CLI, con il modello che scegli; se finiscono i crediti cambia modello, strumento o aspetta il reset. |
+| **📝 Temi d'esame** | Cerca il corso negli anni passati su WeBeep e PoliNetwork e scarica i temi d'esame con le soluzioni, senza doppioni, in ordine di data. Segna quelli fatti. |
 | **🔎 Ricerca semantica** | Cerca per significato in lezioni, slide e appunti (anche tra lingue diverse) e chiedi al corso, con risposte citate. Tutto in locale. |
 | **✎ Appunti** | Markdown, LaTeX o Typst (motori inclusi), con anteprima, assistente AI che propone modifiche da accettare una a una, dettatura vocale. Collegabili a una o più lezioni. |
 | **📅 Studio** | Orario delle lezioni dai Servizi Online, calendario, **aule libere con mappa**, cose da fare, Pomodoro con statistiche. |
 | **☁ Sync e integrazioni** | Appunti e impostazioni su iCloud, Google Drive, Dropbox o OneDrive. Esporta in Notion, Note di Apple, Goodnotes, Notability, Obsidian. |
 | **🤖 Assistenti AI e script** | Server **MCP** e **riga di comando** per usare PoliDesk da Claude o dal tuo flusso di lavoro. |
+
+## Screenshot
+
+| | |
+|---|---|
+| <img src="docs/screenshots/dashboard.png" alt="Dashboard con i corsi"> | <img src="docs/screenshots/lezioni.png" alt="Lezioni del corso con sommari e lezioni fatte"> |
+| **Dashboard**: i tuoi corsi, lezioni scaricate e trascritte. | **Lezioni**: sommario di ogni lezione, filtri, lezioni segnate come fatte. |
+| <img src="docs/screenshots/materiale.png" alt="Materiale del corso e temi d'esame degli anni passati"> | <img src="docs/screenshots/finestra.png" alt="Modalità appunti: la lezione in una finestra separata"> |
+| **Materiale e temi d'esame**: cartelle del corso e PoliNetwork, temi d'esame degli anni passati con le soluzioni. | **Modalità appunti**: video e trascrizione in una finestra a parte, mentre prendi appunti nell'altra. |
+
+<sub>Dati di esempio: corsi e lezioni negli screenshot sono inventati.</sub>
 
 ## Installazione
 
