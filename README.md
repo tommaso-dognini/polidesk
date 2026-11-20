@@ -49,7 +49,8 @@ calendario, aule libere e Pomodoro, tutto in un'unica app.
 
 1. Scarica l'installer dalla pagina **[Releases](../../releases)**:
    - **macOS**: `.dmg` (Apple Silicon `arm64` o Intel);
-   - **Windows** e **Linux**: per ora si compilano dai sorgenti (vedi [Sviluppo](docs/wiki/Sviluppo.md)), gli installer arriveranno nelle prossime versioni.
+   - **Windows**: `PoliDesk-Setup-….exe`;
+   - **Linux**: `.AppImage` o `.deb`.
 2. Serve **Google Chrome** installato: il login PoliMi/SPID avviene in una sua finestra, sui siti ufficiali.
 3. Al primo avvio il **setup** analizza il computer e installa il motore di trascrizione più adatto (qualche minuto).
 
