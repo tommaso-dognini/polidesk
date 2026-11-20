@@ -1,16 +1,11 @@
 # Builds installers for macOS, Windows and Linux (each on its own OS, so the bundled
 # ffmpeg binary and the Rust backend match the platform; macOS gets universal binaries).
-# Artifacts are attached to the workflow run and, for a tag (or a manual run with a tag), uploaded to that GitHub release.
+# Runs ONLY when a version tag is pushed (git tag v0.2.0 && git push origin v0.2.0), never on ordinary pushes:
+# the installers are attached to the workflow run and uploaded to the GitHub release of that tag.
 name: build
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release a cui caricare gli installer (es. v0.1.0); vuoto = solo artifact'
-        required: false
-        default: ''
 permissions:
   contents: write   # upload to the release
 jobs:
@@ -30,7 +25,7 @@ jobs:
             files: dist/*.AppImage dist/*.deb dist/latest-linux.yml
     runs-on: ${{ matrix.os }}
     env:
-      TAG: ${{ github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '') }}
+      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -53,7 +48,6 @@ jobs:
             dist/*.deb
             dist/latest*.yml
       - name: Upload to the release
-        if: env.TAG != ''
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
