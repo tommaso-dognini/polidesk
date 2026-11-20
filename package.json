@@ -116,6 +116,7 @@
     },
     "linux": {
       "category": "Education",
+      "maintainer": "Tommaso Dognini <tommaso-dognini@users.noreply.github.com>",
       "target": [
         "AppImage",
         "deb"
