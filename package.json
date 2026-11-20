@@ -17,6 +17,9 @@
     "build:editor": "esbuild src/renderer-src/editor.js --bundle --minify --format=iife --outfile=src/renderer/vendor/editor.js",
     "prestart": "npm run build:editor && cargo build -p polidesk -p polideskd",
     "predist": "npm run build:editor && node scripts/build-rust.js",
+    "predist:mac": "npm run predist",
+    "predist:win": "npm run predist",
+    "predist:linux": "npm run predist",
     "mcp": "cargo run -q --release -p polidesk -- mcp",
     "build:rust": "cargo build --release",
     "daemon": "cargo run --release -p polideskd"
@@ -48,6 +51,7 @@
   },
   "author": "Tommaso Dognini",
   "build": {
+    "afterPack": "scripts/check-bundle.js",
     "appId": "it.polidesk.app",
     "productName": "PoliDesk",
     "copyright": "GPL-3.0-or-later — PoliDesk contributors, built on PoliWebex (sup3rgiu) and the PoliNetwork community",
@@ -89,7 +93,9 @@
       ],
       "identity": null,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "PoliDesk usa il microfono solo per la dettatura negli appunti (trascritta in locale)."
+        "NSMicrophoneUsageDescription": "PoliDesk usa il microfono solo per la dettatura negli appunti (trascritta in locale).",
+      "NSCalendarsUsageDescription": "PoliDesk mostra nel suo calendario gli eventi dei calendari che scegli (iCloud, Google, Exchange del Politecnico). Non li modifica e non li invia a nessuno.",
+      "NSCalendarsFullAccessUsageDescription": "PoliDesk mostra nel suo calendario gli eventi dei calendari che scegli (iCloud, Google, Exchange del Politecnico). Non li modifica e non li invia a nessuno."
       },
       "icon": "build/icon.png"
     },

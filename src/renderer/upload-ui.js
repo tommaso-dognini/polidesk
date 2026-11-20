@@ -44,8 +44,13 @@ const Upload = (() => {
     const lessonLabelOf = r => `${r.isoDate ? new Date(r.isoDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) + ' · ' : ''}${r.displayTitle || r.file}`;
 
     /** files: [{path, name, size}] — from the picker or a drop */
+    /** list: a FileList, or the DataTransfer of a drop (then dropped folders are recognized as such) */
     function fromFileList(list) {
-        return [...list].map(f => ({ path: api.filePath(f), name: f.name, size: f.size })).filter(f => f.path);
+        const dt = list && list.files ? list : null;
+        const files = dt ? dt.files : list;
+        const dirs = new Set();
+        if (dt && dt.items) [...dt.items].forEach((it, i) => { try { const en = it.webkitGetAsEntry && it.webkitGetAsEntry(); if (en && en.isDirectory) dirs.add(i); } catch (e) { } });
+        return [...files].map((f, i) => ({ path: api.filePath(f), name: f.name, size: dirs.has(i) ? null : f.size, dir: dirs.has(i) })).filter(f => f.path);
     }
 
     /**
@@ -57,8 +62,8 @@ const Upload = (() => {
             let files = [...(ctx.files || [])];
             let scope = ctx.courseId !== undefined ? ctx.courseId : (route.courseId || null);
             const m = modal(`<div class="up-sheet">
-                <div class="fs-hero"><span class="ob-ic" style="background:linear-gradient(135deg,#ffb224,#f76b15)">${icon('download')}</span><div><h2>Carica i tuoi appunti</h2><p class="muted">PDF, foto degli appunti a mano, slide annotate, documenti… Compaiono tra gli appunti del corso e nella lezione che scegli.</p></div></div>
-                <div class="up-drop" id="up-drop" tabindex="0"><div class="up-ico">${icon('download')}</div><b>Trascina qui i file</b><span class="muted">oppure <a id="up-pick">sceglili dal computer</a></span></div>
+                <div class="fs-hero"><span class="ob-ic" style="background:linear-gradient(135deg,#ffb224,#f76b15)">${icon('download')}</span><div><h2>Carica i tuoi appunti</h2><p class="muted">PDF, foto degli appunti a mano, slide annotate, documenti… o intere cartelle. Compaiono tra gli appunti del corso e nella lezione che scegli.</p></div></div>
+                <div class="up-drop" id="up-drop" tabindex="0"><div class="up-ico">${icon('download')}</div><b>Trascina qui file o cartelle</b><span class="muted">oppure <a id="up-pick">scegli dei file</a> · <a id="up-pick-dir">collega una cartella</a></span><span class="faint up-dir-hint">Le cartelle non vengono copiate: PoliDesk ne ricorda il percorso, così restano sempre sincronizzate.</span></div>
                 <div class="gcard up-list hidden" id="up-list"></div>
                 <div class="gcard">
                     ${field('Corso', '', `<select id="up-scope"><option value="">Generale (nessun corso)</option>${S.courses.map(c => `<option value="${c.id}" ${scope === c.id ? 'selected' : ''}>${esc(cname(c))}</option>`).join('')}</select>`)}
@@ -76,19 +81,22 @@ const Upload = (() => {
                 list.classList.toggle('hidden', !files.length);
                 list.innerHTML = files.map((f, i) => {
                     const t = fileTypeOf(f.name);
-                    const badge = t === 'note' ? noteBadge({ kind: { md: 'markdown', tex: 'latex', typ: 'typst' }[f.name.split('.').pop().toLowerCase()] }) : noteBadge({ kind: 'file', type: t });
-                    const st = f.state === 'done' ? `<span class="pill ok">${icon('check')} caricato</span>` : f.state === 'busy' ? '<span class="spin"></span>' : f.state === 'err' ? `<span class="pill err" title="${esc(f.error)}">errore</span>` : `<button class="icon ghost small" data-rm="${i}" title="Togli" aria-label="Togli">✕</button>`;
-                    return `<div class="field up-file"><label>${badge}<span class="up-n" title="${esc(f.path)}">${esc(f.name)}</span></label><div class="ctl"><span class="faint">${f.size != null ? fmtSize(f.size) : ''}</span>${st}</div></div>`;
+                    const badge = f.dir ? '<span class="badge-k file" style="--fc:#8b8d98" title="Cartella collegata">🔗</span>' : t === 'note' ? noteBadge({ kind: { md: 'markdown', tex: 'latex', typ: 'typst' }[f.name.split('.').pop().toLowerCase()] }) : noteBadge({ kind: 'file', type: t });
+                    const st = f.state === 'done' ? `<span class="pill ok">${icon('check')} ${f.dir ? 'collegata' : 'caricato'}</span>` : f.state === 'busy' ? '<span class="spin"></span>' : f.state === 'err' ? `<span class="pill err" title="${esc(f.error)}">errore</span>` : `<button class="icon ghost small" data-rm="${i}" title="Togli" aria-label="Togli">✕</button>`;
+                    return `<div class="field up-file"><label>${badge}<span class="up-n" title="${esc(f.path)}">${esc(f.name)}</span></label><div class="ctl"><span class="faint">${f.dir ? 'cartella collegata' : f.size != null ? fmtSize(f.size) : ''}</span>${st}</div></div>`;
                 }).join('');
                 $$('[data-rm]', list).forEach(b => b.onclick = () => { files.splice(+b.dataset.rm, 1); draw(); });
                 const n = files.filter(f => f.state !== 'done').length;
                 $('#up-go', el).disabled = !n;
-                $('#up-go', el).textContent = n ? `Carica ${n} file` : 'Carica';
-                $('#up-hint', el).textContent = files.length ? `${files.length} file · ${fmtSize(files.reduce((a, f) => a + (f.size || 0), 0))}` : '';
+                const nd = files.filter(f => f.state !== 'done' && f.dir).length, nf = n - nd;
+                $('#up-go', el).textContent = !n ? 'Carica' : [nf ? `Carica ${nf} file` : '', nd ? `${nf ? 'collega' : 'Collega'} ${nd} ${nd === 1 ? 'cartella' : 'cartelle'}` : ''].filter(Boolean).join(' e ');
+                const fl = files.filter(f => !f.dir);
+                $('#up-hint', el).textContent = fl.length ? `${fl.length} file · ${fmtSize(fl.reduce((a, f) => a + (f.size || 0), 0))}` : '';
             };
             const add = list => { for (const f of list) if (f.path && !files.some(x => x.path === f.path)) files.push(f); draw(); };
             const pick = () => guard(async () => { const ps = await api.pickFiles(); add(ps.map(p => ({ path: p, name: p.split(/[\\/]/).pop(), size: null }))); });
-            $('#up-pick', el).onclick = pick;
+            $('#up-pick', el).onclick = e => { e.stopPropagation(); pick(); };
+            $('#up-pick-dir', el).onclick = e => { e.stopPropagation(); guard(async () => { const d = await api.pickDir(); if (d) add([{ path: d, name: d.split(/[\\/]/).filter(Boolean).pop() || d, size: null, dir: true }]); }); };
             const drop = $('#up-drop', el);
             drop.onclick = e => { if (!e.target.closest('a')) pick(); };
             drop.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
@@ -101,18 +109,21 @@ const Upload = (() => {
                 const links = scope && key ? [{ c: scope, k: key }] : [];
                 $('#up-go', el).disabled = true; $('#up-x', el).disabled = true;
                 const out = [];
+                let folders = 0;
                 for (const f of files.filter(f => f.state !== 'done')) {
                     f.state = 'busy'; draw();
                     try {
                         const r = await api.notes.import(scope, [f.path], links);
-                        if (r.errors && r.errors.length) { f.state = 'err'; f.error = r.errors[0].error; } else { f.state = 'done'; out.push(...r.files); }
+                        if (r.errors && r.errors.length) { f.state = 'err'; f.error = r.errors[0].error; }
+                        else { f.state = 'done'; out.push(...r.files, ...(r.folders || [])); if ((r.folders || []).length) { f.dir = true; folders++; } }
                     } catch (e) { f.state = 'err'; f.error = e.message; }
                     draw();
                 }
                 $('#up-x', el).disabled = false;
                 if (!out.length) return;
                 const c = scope && course(scope);
-                toast(`${out.length} ${out.length === 1 ? 'file caricato' : 'file caricati'} negli appunti${c ? ' di ' + cname(c) : ''}`);
+                const nf = out.length - folders;
+                toast([nf ? `${nf} ${nf === 1 ? 'file caricato' : 'file caricati'}` : '', folders ? `${folders} ${folders === 1 ? 'cartella collegata' : 'cartelle collegate'}` : ''].filter(Boolean).join(' e ') + ` negli appunti${c ? ' di ' + cname(c) : ''}`);
                 if (window.Notes && Notes.reload) Notes.reload().catch(() => { });
                 window.dispatchEvent(new CustomEvent('notes-uploaded', { detail: { scope, key, files: out } }));
                 if (files.every(f => f.state === 'done')) { setTimeout(() => m.close(), 450); resolve(out); }
@@ -131,7 +142,7 @@ const Upload = (() => {
         el.addEventListener('drop', e => {
             if (!has(e)) return;
             e.preventDefault(); e.stopPropagation(); depth = 0; el.classList.remove('drop-on');
-            const list = fromFileList(e.dataTransfer.files);
+            const list = fromFileList(e.dataTransfer);
             if (list.length) onFiles(list); else toast('Non riesco a leggere questi file: usa «sceglili dal computer»');
         });
     }
@@ -146,7 +157,7 @@ document.addEventListener('drop', e => {
     e.preventDefault();
     // anywhere else in a course or a lesson: same as the upload button
     if (['course', 'recording', 'notes'].includes(route.name)) {
-        const files = Upload.fromFileList(e.dataTransfer.files);
+        const files = Upload.fromFileList(e.dataTransfer);
         if (files.length) Upload.open({ courseId: route.name === 'notes' ? (Notes.scope || null) : route.courseId, key: route.name === 'recording' ? route.key : undefined, files });
     }
 });
@@ -155,12 +166,13 @@ document.addEventListener('drop', e => {
 async function openFileNote(file, scope, meta) {
     if (window.flushNote) await flushNote();
     if (Notes.editor) { Notes.editor.destroy(); Notes.editor = null; }
-    Notes.scope = scope; Notes.file = file; Notes.kind = 'file';
+    Notes.scope = scope; Notes.file = file; Notes.kind = 'file'; Notes.view = 'file'; Notes.root = false;
     Notes.dir = await api.notes.dir(scope);
-    $$('.n-file').forEach(x => x.classList.toggle('on', x.dataset.f === file && x.closest('.n-group').dataset.s === String(scope || '')));
+    Notes.abs = await api.notes.path(scope, file);
+    if (Notes.setTarget) Notes.setTarget(scope, file.includes('/') ? file.split('/').slice(0, -1).join('/') : null);
     const all = meta ? null : await api.notes.list(scope);
     const f = meta || (all || []).find(x => x.file === file) || { file, kind: 'file', type: fileTypeOf(file) };
-    const abs = Notes.dir + '/' + file, url = 'file://' + encodeURI(abs).replace(/#/g, '%23').replace(/\?/g, '%3F');
+    const abs = Notes.abs, url = 'file://' + encodeURI(abs.replace(/\\/g, '/')).replace(/#/g, '%23').replace(/\?/g, '%3F');
     const scopeName = scope && course(scope) ? cname(course(scope)) : 'Generale';
     const name = file.split('/').pop(), dot = name.lastIndexOf('.');
     const m = $('#n-main');
@@ -199,7 +211,7 @@ async function openFileNote(file, scope, meta) {
         ['Apri con l\'app predefinita', openIt],
         ['Mostra nella cartella', () => api.reveal(abs)],
         '-',
-        ['🗑 Sposta nel cestino', () => guard(async () => { if (!confirm('Spostare il file nel cestino degli appunti (.cestino nella cartella)?')) return; await api.notes.remove(scope, file); Notes.file = null; await Notes.reload(); $('#n-main').innerHTML = '<div class="empty-state">File spostato nel cestino</div>'; })],
+        ['🗑 Sposta nel cestino', () => guard(async () => { if (!confirm(file.startsWith('@') ? 'Questo file è in una cartella collegata: spostare l\'originale nel Cestino del sistema?' : 'Spostare il file nel cestino degli appunti (.cestino nella cartella)?')) return; await api.notes.remove(scope, file); Notes.file = null; await Notes.reload(); $('#n-main').innerHTML = '<div class="empty-state">File spostato nel cestino</div>'; })],
     ]);
     if (typeof drawNoteLinks === 'function') drawNoteLinks(scope, file);
 }

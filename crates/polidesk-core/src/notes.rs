@@ -63,12 +63,17 @@ pub fn dir_for(course_data_dir: &Path) -> PathBuf {
     course_data_dir.join("appunti")
 }
 
+/// Files listed per linked folder at most (a folder can be large: never walk a whole disk).
+const LINKED_MAX: usize = 4000;
 pub fn list(dir: &Path) -> Vec<Value> {
-    fn walk(d: &Path, rel: &str, out: &mut Vec<Value>) {
+    fn walk(d: &Path, rel: &str, out: &mut Vec<Value>, max: usize) {
         let Ok(rd) = std::fs::read_dir(d) else { return };
         for e in rd.filter_map(|e| e.ok()) {
+            if out.len() >= max {
+                return;
+            }
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
+            if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
                 continue;
             }
             let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
@@ -76,7 +81,7 @@ pub fn list(dir: &Path) -> Vec<Value> {
             if p.is_dir() {
                 // images pasted into notes live in assets/: they belong to their note, not to the list
                 if name != "assets" {
-                    walk(&p, &r, out);
+                    walk(&p, &r, out, max);
                 }
             } else if let Some(kind) = kind_by_ext(&name) {
                 let Ok(st) = std::fs::metadata(&p) else { continue };
@@ -94,7 +99,16 @@ pub fn list(dir: &Path) -> Vec<Value> {
         }
     }
     let mut out = vec![];
-    walk(dir, "", &mut out);
+    walk(dir, "", &mut out, usize::MAX);
+    // folders linked from elsewhere on disk (not copied): listed as "@name/…", always up to date
+    for (name, base) in linked_folders(dir) {
+        let mut sub = vec![];
+        walk(&base, &format!("@{name}"), &mut sub, LINKED_MAX);
+        for v in sub.iter_mut() {
+            v["linked"] = json!(true);
+        }
+        out.extend(sub);
+    }
     out.sort_by(|a, b| util::f(b, "mtime").partial_cmp(&util::f(a, "mtime")).unwrap_or(std::cmp::Ordering::Equal));
     out
 }
@@ -122,47 +136,146 @@ pub fn safe(dir: &Path, rel: &str) -> Result<PathBuf> {
     }
     Ok(p)
 }
+/// Folders never walked inside a linked folder (build output, VCS, dependencies).
+const SKIP_DIRS: &[&str] = &["node_modules", "__pycache__", "target", "venv", ".venv"];
+
+// ---------- linked folders (sidecar .polidesk-folders.json): [{ "name": "Analisi", "path": "/abs/path" }] ----------
+// Uploading a folder saves only its path: its files show up among the notes and stay in sync with the disk.
+const FOLDERS: &str = ".polidesk-folders.json";
+fn load_folders(dir: &Path) -> Vec<Value> {
+    util::read_json(&dir.join(FOLDERS)).and_then(|v| v.as_array().cloned()).unwrap_or_default()
+}
+/// (name, absolute path) of each linked folder of this notes folder.
+pub fn linked_folders(dir: &Path) -> Vec<(String, PathBuf)> {
+    load_folders(dir).iter().map(|f| (util::s(f, "name").to_string(), PathBuf::from(util::s(f, "path")))).filter(|(n, p)| !n.is_empty() && !p.as_os_str().is_empty()).collect()
+}
+/// Link a folder (no copy). Returns its name in the list ("@name"); linking the same folder again returns the existing one.
+pub fn link_folder(dir: &Path, src: &Path) -> Result<String> {
+    let src = std::fs::canonicalize(src).map_err(|e| anyhow!("{}: {e}", src.display()))?;
+    if !src.is_dir() {
+        bail!("{} non è una cartella", src.display());
+    }
+    if src.starts_with(dir) || dir.starts_with(&src) {
+        bail!("Questa cartella contiene (o è dentro) la cartella degli appunti: non serve collegarla");
+    }
+    let mut all = load_folders(dir);
+    if let Some(f) = all.iter().find(|f| Path::new(util::s(f, "path")) == src) {
+        return Ok(format!("@{}", util::s(f, "name")));
+    }
+    let base = clean_name(&src.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "Cartella".into())).replace('@', "");
+    let base = if base.is_empty() { "Cartella".to_string() } else { base };
+    let taken = |n: &str| all.iter().any(|f| util::s(f, "name").eq_ignore_ascii_case(n));
+    let mut name = base.clone();
+    let mut i = 2;
+    while taken(&name) {
+        name = format!("{base} {i}");
+        i += 1;
+    }
+    all.push(json!({ "name": name, "path": src }));
+    std::fs::create_dir_all(dir)?;
+    util::write_atomic(&dir.join(FOLDERS), serde_json::to_string_pretty(&all)?)?;
+    Ok(format!("@{name}"))
+}
+/// Forget a linked folder ("@name" or "name"); its files on disk are not touched.
+pub fn unlink_folder(dir: &Path, name: &str) -> Result<bool> {
+    let name = name.trim_start_matches('@');
+    let mut all = load_folders(dir);
+    let n = all.len();
+    all.retain(|f| util::s(f, "name") != name);
+    if all.len() == n {
+        bail!("cartella collegata non trovata");
+    }
+    util::write_atomic(&dir.join(FOLDERS), serde_json::to_string_pretty(&all)?)?;
+    // lesson links of its files go too
+    let mut links = get_all_links(dir);
+    links.retain(|k, _| !k.starts_with(&format!("@{name}/")));
+    save_all_links(dir, links)?;
+    Ok(true)
+}
+/// For a path in the list: (root it is relative to, "@name/" prefix or "", path inside that root).
+fn split_linked<'a>(dir: &Path, rel: &'a str) -> Option<(PathBuf, String, &'a str)> {
+    let first = rel.split('/').next()?;
+    let name = first.strip_prefix('@')?;
+    let (_, base) = linked_folders(dir).into_iter().find(|(n, _)| n == name)?;
+    Some((base, format!("{first}/"), rel[first.len()..].trim_start_matches('/')))
+}
+/// Absolute path of an entry of the list: inside the notes folder, or inside a linked folder ("@name/…").
+pub fn resolve(dir: &Path, rel: &str) -> Result<PathBuf> {
+    match split_linked(dir, rel) {
+        Some((base, _, "")) => Ok(base),
+        Some((base, _, rest)) => safe(&base, rest),
+        None => safe(dir, rel),
+    }
+}
+/// Is this entry in a linked folder?
+pub fn is_linked(dir: &Path, rel: &str) -> bool {
+    split_linked(dir, rel).is_some()
+}
 fn clean_name(s: &str) -> String {
     s.chars().map(|c| if r#"\/:*?"<>|"#.contains(c) { '-' } else { c }).collect::<String>().trim().to_string()
 }
 
 pub fn create(dir: &Path, title: &str, kind: &str) -> Result<String> {
-    std::fs::create_dir_all(dir)?;
+    create_in(dir, None, title, kind)
+}
+/// New note in `folder` (a folder of the list, also in a linked folder) or at the top of the notes folder.
+pub fn create_in(dir: &Path, folder: Option<&str>, title: &str, kind: &str) -> Result<String> {
+    let folder = folder.map(|f| f.trim_matches('/')).filter(|f| !f.is_empty());
+    let target = match folder {
+        Some(f) => resolve(dir, f)?,
+        None => dir.to_path_buf(),
+    };
+    std::fs::create_dir_all(&target)?;
     let title = if title.trim().is_empty() { "Senza titolo" } else { title };
     let base = clean_name(title);
     let ext = ext_of(kind);
     let mut name = format!("{base}{ext}");
     let mut i = 2;
-    while dir.join(&name).exists() {
+    while target.join(&name).exists() {
         name = format!("{base} {i}{ext}");
         i += 1;
     }
-    std::fs::write(dir.join(&name), template(kind, title))?;
-    Ok(name)
+    std::fs::write(target.join(&name), template(kind, title))?;
+    Ok(match folder {
+        Some(f) => format!("{f}/{name}"),
+        None => name,
+    })
 }
 pub fn read(dir: &Path, rel: &str) -> Result<String> {
-    Ok(std::fs::read_to_string(safe(dir, rel)?)?)
+    Ok(std::fs::read_to_string(resolve(dir, rel)?)?)
 }
 pub fn write(dir: &Path, rel: &str, content: &str) -> Result<bool> {
-    util::write_atomic(&safe(dir, rel)?, content)?;
+    util::write_atomic(&resolve(dir, rel)?, content)?;
     Ok(true)
 }
 pub fn rename(dir: &Path, rel: &str, new_name: &str) -> Result<String> {
-    let from = safe(dir, rel)?;
+    let from = resolve(dir, rel)?;
+    if split_linked(dir, rel).is_some_and(|(_, _, rest)| rest.is_empty()) {
+        bail!("Per rinominare una cartella collegata, rinominala nel Finder e collegala di nuovo");
+    }
     let ext = Path::new(rel).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
-    let parent = Path::new(rel).parent().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-    let nrel_raw = if parent.is_empty() { format!("{}{ext}", clean_name(new_name)) } else { format!("{parent}/{}{ext}", clean_name(new_name)) };
-    let to = safe(dir, &nrel_raw)?;
+    let parent = rel.rsplit_once('/').map(|(p, _)| p.to_string()).unwrap_or_default();
+    let nrel = if parent.is_empty() { format!("{}{ext}", clean_name(new_name)) } else { format!("{parent}/{}{ext}", clean_name(new_name)) };
+    let to = resolve(dir, &nrel)?;
     if to.exists() {
         bail!("esiste già un appunto con questo nome");
     }
     std::fs::rename(&from, &to)?;
-    let nrel = util::rel_slash(dir, &to);
     move_links(dir, rel, Some(&nrel))?;
     Ok(nrel)
 }
 /// Moves the note into .cestino/ (recoverable).
+/// Files of a linked folder go to the system Trash (they are the student's originals); a linked folder
+/// itself is only unlinked.
 pub fn remove(dir: &Path, rel: &str) -> Result<bool> {
+    if let Some((base, _, rest)) = split_linked(dir, rel) {
+        if rest.is_empty() {
+            return unlink_folder(dir, rel);
+        }
+        crate::sys::trash(&safe(&base, rest)?)?;
+        move_links(dir, rel, None)?;
+        return Ok(true);
+    }
     let p = safe(dir, rel)?;
     let trash = dir.join(".cestino");
     std::fs::create_dir_all(&trash)?;
@@ -203,7 +316,7 @@ pub fn import(dir: &Path, src: &Path, sub: Option<&str>) -> Result<String> {
 
 /// Save a pasted/dropped image next to the note (assets/) and return its relative path.
 pub fn save_asset(dir: &Path, rel: &str, name: &str, data: &[u8]) -> Result<String> {
-    let assets = safe(dir, rel)?.parent().ok_or_else(|| anyhow!("percorso non valido"))?.join("assets");
+    let assets = resolve(dir, rel)?.parent().ok_or_else(|| anyhow!("percorso non valido"))?.join("assets");
     std::fs::create_dir_all(&assets)?;
     let clean: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' { c } else { '_' }).collect();
     let fname = format!("{}-{clean}", util::now_ms());
@@ -336,11 +449,16 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
 /// Compile .typ / .tex to PDF next to the source. Returns {ok, pdf, log, errors}.
 pub async fn compile(dir: &Path, rel: &str, on_log: &(dyn Fn(String) + Send + Sync)) -> Result<Value> {
     use tokio::io::{AsyncBufReadExt, BufReader};
-    let src = safe(dir, rel)?;
+    let src = resolve(dir, rel)?;
+    // a note in a linked folder: Typst's root (and the returned PDF path) are that folder
+    let (root, prefix) = match split_linked(dir, rel) {
+        Some((base, prefix, _)) => (base, prefix),
+        None => (dir.to_path_buf(), String::new()),
+    };
     let kind = kind_by_ext(rel).unwrap_or("markdown");
     let out_dir = src.parent().unwrap().to_path_buf();
     let (bin, args): (PathBuf, Vec<std::ffi::OsString>) = match kind {
-        "typst" => (engine_bin("typst"), vec!["compile".into(), "--root".into(), dir.into(), src.clone().into(), src.with_extension("pdf").into()]),
+        "typst" => (engine_bin("typst"), vec!["compile".into(), "--root".into(), root.clone().into(), src.clone().into(), src.with_extension("pdf").into()]),
         "latex" => (engine_bin("tectonic"), vec!["-X".into(), "compile".into(), "--outdir".into(), out_dir.clone().into(), "--keep-logs".into(), src.clone().into()]),
         _ => bail!("Solo Typst e LaTeX vanno compilati"),
     };
@@ -371,7 +489,7 @@ pub async fn compile(dir: &Path, rel: &str, on_log: &(dyn Fn(String) + Send + Sy
     let log = log.lock().unwrap().clone();
     Ok(json!({
         "ok": code.success() && pdf.exists(),
-        "pdf": if pdf.exists() { json!(util::rel_slash(dir, &pdf)) } else { Value::Null },
+        "pdf": if pdf.exists() { json!(format!("{prefix}{}", util::rel_slash(&root, &pdf))) } else { Value::Null },
         "errors": parse_errors(kind, &log),
         "log": log,
     }))
@@ -384,5 +502,38 @@ fn parse_errors(kind: &str, log: &str) -> Vec<Value> {
         TYP.captures_iter(log).map(|m| json!({ "line": m[3].parse::<u32>().unwrap_or(0), "col": m[4].parse::<u32>().unwrap_or(0), "msg": &m[1] })).collect()
     } else {
         TEX.captures_iter(log).map(|m| json!({ "line": m[2].parse::<u32>().unwrap_or(0), "msg": &m[3] })).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linked_folder_is_listed_resolved_and_unlinked() {
+        let root = std::env::temp_dir().join(format!("polidesk-notes-test-{}", uuid::Uuid::new_v4()));
+        let (dir, ext) = (root.join("appunti"), root.join("Analisi 1"));
+        std::fs::create_dir_all(ext.join("esercizi/node_modules")).unwrap();
+        std::fs::write(ext.join("teoria.md"), "# Limiti").unwrap();
+        std::fs::write(ext.join("esercizi/foglio.pdf"), "%PDF").unwrap();
+        std::fs::write(ext.join("esercizi/node_modules/x.js"), "").unwrap();
+        let name = link_folder(&dir, &ext).unwrap();
+        assert_eq!(name, "@Analisi 1");
+        assert_eq!(link_folder(&dir, &ext).unwrap(), name, "linking twice keeps one entry");
+        let mut files: Vec<String> = list(&dir).iter().map(|f| util::s(f, "file").to_string()).collect();
+        files.sort();
+        assert_eq!(files, ["@Analisi 1/esercizi/foglio.pdf", "@Analisi 1/teoria.md"]);
+        // edits go to the original file (no copy)
+        write(&dir, "@Analisi 1/teoria.md", "# Derivate").unwrap();
+        assert_eq!(std::fs::read_to_string(ext.join("teoria.md")).unwrap(), "# Derivate");
+        let n = create_in(&dir, Some("@Analisi 1/esercizi"), "Nuovo", "typst").unwrap();
+        assert_eq!(n, "@Analisi 1/esercizi/Nuovo.typ");
+        assert!(ext.join("esercizi/Nuovo.typ").exists());
+        assert_eq!(rename(&dir, &n, "Rinominato").unwrap(), "@Analisi 1/esercizi/Rinominato.typ");
+        assert!(resolve(&dir, "@Analisi 1/../../etc").is_err());
+        unlink_folder(&dir, &name).unwrap();
+        assert!(list(&dir).is_empty());
+        assert!(ext.join("teoria.md").exists(), "unlinking never deletes");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

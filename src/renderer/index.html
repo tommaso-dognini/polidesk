@@ -16,13 +16,17 @@
             <button id="sb-search" class="sb-search" aria-label="Apri la command palette"><span data-icon="search"></span><span class="grow">Cerca o esegui…</span><kbd class="mod">K</kbd></button>
             <nav class="nav">
                 <a data-route="dashboard" class="nav-item" data-keys="alt+1"><span class="ico" data-icon="home"></span>Dashboard</a>
-                <a data-route="notes" class="nav-item" data-keys="alt+2"><span class="ico" data-icon="note"></span>Appunti</a>
                 <a data-route="calendar" class="nav-item" data-keys="alt+3"><span class="ico" data-icon="calendar"></span>Calendario</a>
                 <a data-route="rooms" class="nav-item" data-keys="alt+4"><span class="ico" data-icon="pin"></span>Aule libere</a>
                 <a data-route="todos" class="nav-item" data-keys="alt+5"><span class="ico" data-icon="check"></span>Da fare</a>
             </nav>
-            <div class="nav-label">Corsi</div>
-            <nav id="side-courses" class="nav courses"></nav>
+            <div class="sb-scroll">
+                <div class="nav-label">Corsi</div>
+                <nav id="side-courses" class="nav courses"></nav>
+                <!-- «Appunti»: courses → folders → notes, right here (no second sidebar in the notes page) -->
+                <div class="nav-label sn-label"><a id="sn-home" class="sn-title" data-keys="alt+2" title="Tutti gli appunti (⌘⌥2)">Appunti</a><span class="grow"></span><button class="icon ghost small" id="sn-up" title="Carica file o collega una cartella" aria-label="Carica appunti"><span data-icon="download"></span></button><button class="icon ghost small" id="sn-new" title="Nuovo appunto (⌘N)" aria-label="Nuovo appunto"><span data-icon="plus"></span></button></div>
+                <nav id="side-notes" class="nav side-notes"></nav>
+            </div>
             <nav class="nav">
                 <!-- Community: hidden for now (viewCommunity in app.js is kept, commented out of the routes)
                 <a data-route="community" class="nav-item"><span class="ico" data-icon="users"></span>Community</a> -->

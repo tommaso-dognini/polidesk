@@ -2,7 +2,7 @@
 use crate::browser::Session;
 use crate::downloader::{self, Headers};
 use crate::library as lib;
-use crate::{exams, materials, recman, tools, util, webeep, webex, Emit};
+use crate::{enhance, exams, materials, recman, tools, util, webeep, webex, Emit};
 use anyhow::{anyhow, bail, Result};
 use base64::Engine;
 use serde_json::{json, Value};
@@ -353,7 +353,7 @@ pub async fn sync_course(s: &Arc<Session>, course: &Value, opts: &Opts, emit: Em
         if should_stop() {
             break;
         }
-        let job = Download { ctx: ctx.clone(), s: s.clone(), serial: serial.clone(), emit: emit.clone(), password: password.clone(), ok: ok.clone(), failed: failed.clone(), control: opts.control.clone(), audio: audio_only };
+        let job = Download { ctx: ctx.clone(), s: s.clone(), serial: serial.clone(), emit: emit.clone(), password: password.clone(), ok: ok.clone(), failed: failed.clone(), control: opts.control.clone(), audio: audio_only, enhance: course["enhanceAudio"].as_bool().unwrap_or_else(|| crate::config::load()["settings"]["download"]["enhanceAudio"].as_bool() == Some(true)) };
         set.spawn(async move {
             let _permit = permit;
             job.run(r0).await;
@@ -377,6 +377,8 @@ struct Download {
     control: Arc<Control>,
     /// audio track only (streamOnly courses)
     audio: bool,
+    /// «Migliora l'audio» right after the download
+    enhance: bool,
 }
 impl Download {
     async fn paused(&self, key: &str) {
@@ -412,6 +414,19 @@ impl Download {
         let Some(res) = res else { return self.paused(&key).await };
         match res {
             Ok(()) => {
+                // voice enhancement before the lesson is marked downloaded (transcription then uses the clean audio)
+                if self.enhance {
+                    ctx.log(format!("  🎚 Miglioro l'audio: {file}"));
+                    let (emit, cid, k) = (self.emit.clone(), ctx.course_id.clone(), key.clone());
+                    let on = move |p: f64| emit(json!({ "type": "enhance-progress", "course": cid, "key": k, "percent": p.round() }));
+                    match enhance::enhance(&ctx.dir, &dest, &on).await {
+                        Ok(()) => (self.emit)(json!({ "type": "enhance-done", "course": ctx.course_id, "key": key })),
+                        Err(e) => {
+                            ctx.log(format!("  ⚠ Audio non migliorato ({file}): {e}"));
+                            (self.emit)(json!({ "type": "enhance-done", "course": ctx.course_id, "key": key, "error": e.to_string() }));
+                        }
+                    }
+                }
                 let audio = self.audio;
                 ctx.set_rec(&key, |x| {
                     x["status"] = json!(if audio { "audio" } else { "downloaded" });

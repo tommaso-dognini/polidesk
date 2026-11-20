@@ -14,7 +14,7 @@ pub const METHODS: &[&str] = &[
     "ws:get", "ws:page", "ws:todo:add", "ws:todo:set", "ws:todo:remove", "ws:pomodoro", "ws:all-todos",
     "notes:scopes", "notes:list", "notes:read", "notes:write", "notes:create", "notes:rename", "notes:remove", "notes:asset", "notes:dir",
     "notes:links", "notes:setLinks", "notes:forLesson", "notes:linkCounts", "notes:createLinked", "notes:import", "notes:engines", "notes:installEngine", "notes:compile",
-    "notes:exportTo", "notes:path", "integrations:apps", "integrations:testNotion", "integrations:openPdfIn",
+    "notes:exportTo", "notes:path", "notes:linkFolder", "integrations:apps", "integrations:testNotion", "integrations:openPdfIn",
     "cloud:detect", "cloud:set", "cloud:pull", "cloud:autopull",
     "daemon:info", "daemon:shutdown", "app:ready",
     "webeep:courses", "sync", "sync:stop", "transcribe", "transcribe:cancel", "notes", "notes:batch", "agent", "lesson:ask", "ai:assist",
@@ -26,7 +26,8 @@ pub const METHODS: &[&str] = &[
     "transcribe:pause", "transcribe:resume", "transcriptions:pauseAll", "transcriptions:resumeAll",
     "drives:status", "drive:wait", "login:done", "login:cancel", "ai:use", "ai:wait", "ai:resume", "ai:models", "ai:rescan", "rec:stream", "rec:streamTarget", "rec:downloadVideo", "course:freeSpace", "deps:status", "deps:install", "deps:terminal",
     "pn:index", "pn:match", "pn:tree", "pn:download", "pn:status", "pn:cancel",
-    "materials:remove", "exams:run",
+    "materials:remove", "exams:run", "audio:enhance",
+    "cal:feeds", "cal:addFeed", "cal:updateFeed", "cal:removeFeed", "cal:refreshFeeds", "cal:macStatus", "cal:macCalendars",
 ];
 
 /// Run blocking filesystem work off the async workers.
@@ -112,6 +113,44 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
             Ok(json!(std::fs::read_to_string(notes::safe(&base, p.req("file")?)?)?))
         })
         .await,
+        // «Migliora l'audio» (or «Ripristina l'audio originale») of downloaded lessons, in the background, one at a time
+        "audio:enhance" => {
+            let id = p.req("courseId")?.to_string();
+            let c = config::course(&id)?;
+            let dir = lib::dir_of(&c);
+            lib::ensure_drive(&dir)?;
+            let restore = util::b(&p, "restore");
+            let keys = p.get("keys").filter(|k| k.is_array()).map(|k| util::str_list(Some(k)));
+            let todo: Vec<(String, PathBuf)> = lib::with_file_status(&dir, &lib::load_manifest(&dir))
+                .into_iter()
+                .filter(|r| keys.as_ref().map(|k| k.iter().any(|x| x == util::s(r, "key"))).unwrap_or(true))
+                .filter_map(|r| lib::media_path(&dir, &r).map(|f| (util::s(&r, "key").to_string(), f)))
+                .filter(|(_, f)| polidesk_core::enhance::is_enhanced(&dir, f) == restore)
+                .collect();
+            let n = todo.len();
+            let d2 = d.clone();
+            tokio::spawn(async move {
+                static ONE: std::sync::LazyLock<tokio::sync::Mutex<()>> = std::sync::LazyLock::new(Default::default);
+                let _one = ONE.lock().await;
+                let name = config::course_name(&c);
+                for (i, (key, f)) in todo.iter().enumerate() {
+                    let file = f.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+                    d2.log(format!("🎚 {} {} di {n} · {name}: {file}", if restore { "Ripristino l'audio" } else { "Miglioro l'audio" }, i + 1), Some(&id));
+                    let (d3, cid, k) = (d2.clone(), id.clone(), key.clone());
+                    let on = move |p: f64| d3.send(json!({ "type": "enhance-progress", "course": cid, "key": k, "percent": p.round() }));
+                    let r = if restore { polidesk_core::enhance::restore(&dir, f).await } else { polidesk_core::enhance::enhance(&dir, f, &on).await };
+                    if let Err(e) = &r {
+                        d2.log(format!("⚠ Audio di {file}: {e}"), Some(&id));
+                    }
+                    d2.send(json!({ "type": "enhance-done", "course": id, "key": key, "error": r.err().map(|e| e.to_string()) }));
+                }
+                if n > 0 {
+                    d2.log(format!("🎚 {name}: audio {} in {n} lezion{}", if restore { "originale ripristinato" } else { "migliorato" }, if n == 1 { "e" } else { "i" }), Some(&id));
+                }
+                d2.refresh();
+            });
+            Ok(json!({ "queued": n }))
+        }
         "materials:remove" => {
             let r = blocking(move || remove_materials(p.req("courseId")?, &util::str_list(p.get("paths")))).await?;
             d.refresh();
@@ -198,7 +237,7 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
             Ok(json!(r))
         })
         .await,
-        "notes:create" => blocking(move || Ok(json!(notes::create(&notes_dir(&p["scope"])?, p["title"].as_str().unwrap_or(""), p.str_of("kind").unwrap_or("markdown"))?))).await,
+        "notes:create" => blocking(move || Ok(json!(notes::create_in(&notes_dir(&p["scope"])?, p.str_of("folder"), p["title"].as_str().unwrap_or(""), p.str_of("kind").unwrap_or("markdown"))?))).await,
         "notes:rename" => blocking(move || Ok(json!(notes::rename(&notes_dir(&p["scope"])?, p.req("file")?, p.req("name")?)?))).await,
         "notes:remove" => blocking(move || Ok(json!(notes::remove(&notes_dir(&p["scope"])?, p.req("file")?)?))).await,
         "notes:asset" => blocking(move || {
@@ -207,7 +246,14 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
         })
         .await,
         "notes:dir" => blocking(move || Ok(json!(notes_dir(&p)?))).await,
-        "notes:path" => blocking(move || Ok(json!(notes::safe(&notes_dir(&p["scope"])?, p.req("file")?)?))).await,
+        "notes:path" => blocking(move || Ok(json!(notes::resolve(&notes_dir(&p["scope"])?, p.req("file")?)?))).await,
+        // a folder of the student linked among the notes: only its path is saved, its files stay where they are
+        "notes:linkFolder" => blocking(move || {
+            let f = notes::link_folder(&notes_dir(&p["scope"])?, Path::new(p.req("path")?))?;
+            d.notes_changed(p.str_of("scope"));
+            Ok(json!(f))
+        })
+        .await,
         "notes:links" => blocking(move || Ok(notes::get_links(&notes_dir(&p["scope"])?, p.req("file")?))).await,
         "notes:setLinks" => blocking(move || notes::set_links(&notes_dir(&p["scope"])?, p.req("file")?, &p["links"])).await,
         "notes:forLesson" => blocking(move || notes_for_lesson(p.req("courseId")?, p.req("key")?)).await,
@@ -242,7 +288,16 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
             let dir = notes_dir(&p["scope"])?;
             let mut done = vec![];
             let mut errors = vec![];
+            let mut folders = vec![];
             for src in util::str_list(p.get("paths")) {
+                // folders are linked, not copied (they stay in sync with the disk)
+                if Path::new(&src).is_dir() {
+                    match notes::link_folder(&dir, Path::new(&src)) {
+                        Ok(f) => folders.push(f),
+                        Err(e) => errors.push(json!({ "path": src, "error": e.to_string() })),
+                    }
+                    continue;
+                }
                 match notes::import(&dir, std::path::Path::new(&src), p.str_of("folder")) {
                     Ok(f) => {
                         if p["links"].as_array().is_some_and(|a| !a.is_empty()) {
@@ -253,11 +308,16 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
                     Err(e) => errors.push(json!({ "path": src, "error": e.to_string() })),
                 }
             }
-            if !done.is_empty() {
+            if !done.is_empty() || !folders.is_empty() {
                 d.notes_changed(p.str_of("scope"));
+            }
+            if !done.is_empty() {
                 d.log(format!("📎 {} file caricati negli appunti", done.len()), p.str_of("scope"));
             }
-            Ok(json!({ "files": done, "errors": errors }))
+            if !folders.is_empty() {
+                d.log(format!("🔗 {} cartelle collegate agli appunti", folders.len()), p.str_of("scope"));
+            }
+            Ok(json!({ "files": done, "folders": folders, "errors": errors }))
         })
         .await,
         "notes:engines" => blocking(|| Ok(notes::engine_status())).await,
@@ -271,7 +331,7 @@ pub async fn call(d: &Arc<Daemon>, client: &str, method: &str, p: Value) -> Resu
             let d2 = d.clone();
             let mut r = notes::compile(&dir, p.req("file")?, &move |l| d2.send(json!({ "type": "compile-log", "line": l }))).await?;
             if let Some(pdf) = r["pdf"].as_str() {
-                r["pdfUrl"] = json!(format!("{}?t={}", file_url(&dir.join(pdf)), util::now_ms()));
+                r["pdfUrl"] = json!(format!("{}?t={}", file_url(&notes::resolve(&dir, pdf)?), util::now_ms()));
             }
             Ok(r)
         }
@@ -366,11 +426,20 @@ pub fn course_view(c: &Value) -> Value {
     if dir.join("materiale").join("LINK.md").exists() {
         mats.push("LINK.md".into());
     }
+    let enh = polidesk_core::enhance::enhanced(&dir);
+    let recordings: Vec<Value> = lib::with_file_status(&dir, &m)
+        .into_iter()
+        .map(|mut r| {
+            let on = lib::media_path(&dir, &r).and_then(|f| f.file_name().map(|n| n.to_string_lossy().to_string())).map(|n| enh.get(&n).is_some()).unwrap_or(false);
+            r["audioEnhanced"] = json!(on);
+            r
+        })
+        .collect();
     util::merge(
         c,
         &json!({
             "manifest": { "course": m.get("course").cloned().unwrap_or(Value::Null), "sources": m.get("sources").cloned().unwrap_or(json!([])) },
-            "recordings": lib::with_file_status(&dir, &m),
+            "recordings": recordings,
             "materialsCount": m["materials"].as_object().map(|o| o.len()).unwrap_or(0),
             "dirExists": dir.exists(),
             "drive": polidesk_core::drives::info(&dir),
@@ -602,7 +671,7 @@ fn notes_for_lesson(course_id: &str, key: &str) -> Result<Value> {
 async fn export_to(p: &Value) -> Result<Value> {
     let dir = notes_dir(&p["scope"])?;
     let file = p.req("file")?;
-    let abs = notes::safe(&dir, file)?;
+    let abs = notes::resolve(&dir, file)?;
     let kind = notes::kind_by_ext(file).unwrap_or("markdown");
     let title = Path::new(file).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let content = std::fs::read_to_string(&abs)?;
@@ -651,7 +720,7 @@ async fn pdf_for(p: &Value, dir: &Path, file: &str, kind: &str) -> Result<PathBu
     if !util::b(&r, "ok") {
         bail!("Compilazione non riuscita: correggi gli errori prima di esportare");
     }
-    Ok(dir.join(util::s(&r, "pdf")))
+    notes::resolve(dir, util::s(&r, "pdf"))
 }
 
 /// Installed Whisper engine, cached for a minute (spawning Python costs ~0.3 s).

@@ -98,7 +98,7 @@ pub fn detect() -> Value {
         "appleSilicon": apple_silicon, "nvidia": nvidia, "uv": tools::which("uv"), "pythons": pythons,
         "venv": if venv_python().exists() { json!(venv()) } else { Value::Null },
         "aria2c": tools::which("aria2c"), "ffmpeg": tools::ffmpeg(), "chrome": crate::browser::find_chrome().ok(),
-        "ai": { "agy": tools::which("agy"), "claude": tools::which("claude"), "copilot": tools::which("copilot") },
+        "ai": { "agy": tools::which("agy"), "claude": tools::which("claude"), "copilot": tools::which("copilot"), "codex": tools::which("codex"), "opencode": tools::which("opencode") },
     })
 }
 

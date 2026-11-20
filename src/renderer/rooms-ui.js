@@ -9,6 +9,9 @@ const H0 = 7, H1 = 20;
 const pad2 = n => String(n).padStart(2, '0');
 const hm = m => `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}`;
 const sedeShort = n => n.replace(/^Milano\s+/, '');
+const STAR = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z"/></svg>';
+const MAP = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/></svg>';
+const LIST = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>';
 
 function roomsState() {
     const r = S.settings.rooms || {};
@@ -26,26 +29,24 @@ window.extraViews.rooms = async v => {
     const sp = await api.rooms.spaces();
     const cities = { Milano: [] };
     for (const s of sp.sedi) (cities[s.city === 'Milano' ? 'Milano' : 'Altre città'] = cities[s.city === 'Milano' ? 'Milano' : 'Altre città'] || []).push(s);
-    v.innerHTML = `<div class="rooms">
-        <aside class="rooms-filters">
-            <div class="rf-card"><div class="rf-h">🏛 Sede</div>
-                ${Object.entries(cities).map(([city, list]) => `<div class="rf-sub">${esc(city)}</div>${list.map(s => `<button class="rf-opt ${s.id === st.sede ? 'on' : ''}" data-sede="${s.id}"><span>${esc(sedeShort(s.name))}</span>${s.id === st.sede ? '<span>✓</span>' : ''}</button>`).join('')}`).join('')}
-            </div>
-            <div class="rf-card"><div class="rf-h">📅 Giorno</div><div class="days" id="r-days"></div></div>
-            <div class="rf-card"><div class="rf-h">🕑 Orario</div>
-                <div class="time-row"><span class="time-big" id="r-time"></span><span class="grow"></span><div class="dur"><button id="r-dm">−</button><span id="r-dur"></span><button id="r-dp">+</button></div></div>
-                <div class="hours" id="r-hours"></div><div class="hours-lbl">${Array.from({ length: H1 - H0 }, (_, i) => `<span>${H0 + i}</span>`).join('')}</div>
-            </div>
-            <p class="faint rf-credit">Dati pubblici del Politecnico · idea di <a data-ext="https://poliaule.com">PoliAule</a> e <a data-ext="https://github.com/riccardosalemme/alpolimibot">@alpolimibot</a></p>
+    v.innerHTML = `<div class="page wide ra-page">
+        <div class="page-head"><div><h1>Aule libere</h1><div class="sub" id="r-sum">Dati pubblici del Politecnico, in tempo reale</div></div>
+            <button class="ghost small ${RoomsUI.partial ? 'on' : ''}" id="r-part" title="Mostra anche le aule libere solo per una parte dell'intervallo"><span class="ra-tick">${icon('check')}</span>Anche parziali</button>
+            <div class="seg" id="r-view"><button data-v="list" class="${RoomsUI.view === 'list' ? 'on' : ''}">${LIST} Elenco</button><button data-v="map" class="${RoomsUI.view === 'map' ? 'on' : ''}">${MAP} Mappa</button></div></div>
+        <div class="ra">
+        <aside class="ra-filters">
+            <div class="ra-sec"><div class="ra-lbl">Sede</div>
+                <select id="r-sede">${Object.entries(cities).map(([city, list]) => `<optgroup label="${esc(city)}">${list.map(s => `<option value="${s.id}" ${s.id === st.sede ? 'selected' : ''}>${esc(sedeShort(s.name))}</option>`).join('')}</optgroup>`).join('')}</select></div>
+            <div class="ra-sec"><div class="ra-lbl">Giorno</div><div class="ra-days" id="r-days"></div></div>
+            <div class="ra-sec"><div class="ra-lbl">Orario</div>
+                <div class="ra-time"><span id="r-time"></span><span class="grow"></span><div class="ra-dur" title="Durata"><button id="r-dm" aria-label="Meno tempo">−</button><span id="r-dur"></span><button id="r-dp" aria-label="Più tempo">+</button></div></div>
+                <div class="ra-hours" id="r-hours"></div><div class="ra-hlbl">${Array.from({ length: H1 - H0 }, (_, i) => `<span>${H0 + i}</span>`).join('')}</div>
+                <div class="faint ra-hint">Clicca un'ora per scegliere l'inizio</div></div>
+            <p class="faint ra-credit">Dati pubblici del Politecnico · idea di <a data-ext="https://poliaule.com">PoliAule</a> e <a data-ext="https://github.com/riccardosalemme/alpolimibot">@alpolimibot</a></p>
         </aside>
-        <section class="rooms-main">
-            <div class="rooms-top"><h1>Aule libere</h1><span class="faint" id="r-sum"></span><span class="grow"></span>
-                <button class="chip ${RoomsUI.partial ? 'on' : ''}" id="r-part" title="Mostra anche le aule libere solo per una parte dell'intervallo">◐ Anche parziali</button>
-                <div class="seg" id="r-view"><button data-v="list" class="${RoomsUI.view === 'list' ? 'on' : ''}">☷ Elenco</button><button data-v="map" class="${RoomsUI.view === 'map' ? 'on' : ''}">🗺 Mappa</button></div></div>
-            <div id="r-body" class="rooms-body"></div>
-        </section></div>`;
+        <section class="ra-main"><div id="r-body"></div></section></div></div>`;
     $$('[data-ext]', v).forEach(a => a.onclick = () => api.openExternal(a.dataset.ext));
-    $$('[data-sede]', v).forEach(b => b.onclick = () => { st.sede = b.dataset.sede; RoomsUI.building = null; saveRoomsPrefs(); window.extraViews.rooms(v); });
+    $('#r-sede', v).onchange = e => { st.sede = e.target.value; RoomsUI.building = null; saveRoomsPrefs(); window.extraViews.rooms(v); };
     $('#r-part', v).onclick = () => { RoomsUI.partial = !RoomsUI.partial; $('#r-part', v).classList.toggle('on', RoomsUI.partial); drawBody(); };
     $$('#r-view button', v).forEach(b => b.onclick = () => { RoomsUI.view = b.dataset.v; $$('#r-view button', v).forEach(x => x.classList.toggle('on', x === b)); drawBody(); });
     $('#r-dm', v).onclick = () => { st.dur = Math.max(30, st.dur - 30); saveRoomsPrefs(); drawTime(); load(); };
@@ -54,8 +55,8 @@ window.extraViews.rooms = async v => {
 
     function drawDays() {
         const it = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() + i); return d; });
-        $('#r-days', v).innerHTML = it.map((d, i) => `<button class="day ${i === st.day ? 'on' : ''} ${d.getDay() === 0 ? 'sun' : ''}" data-d="${i}"><span>${'DLMMGVS'[d.getDay()]}</span><b>${d.getDate()}</b>${i === 0 ? '<i>oggi</i>' : ''}</button>`).join('');
-        $$('#r-days .day', v).forEach(b => b.onclick = () => { st.day = +b.dataset.d; drawDays(); load(); });
+        $('#r-days', v).innerHTML = it.map((d, i) => `<button class="${i === st.day ? 'on' : ''} ${d.getDay() === 0 ? 'sun' : ''}" data-d="${i}" title="${d.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })}"><span>${i === 0 ? 'oggi' : 'DLMMGVS'[d.getDay()]}</span><b>${d.getDate()}</b></button>`).join('');
+        $$('#r-days button', v).forEach(b => b.onclick = () => { st.day = +b.dataset.d; drawDays(); load(); });
     }
     function drawTime() {
         const to = Math.min(H1 * 60, st.from + st.dur);
@@ -65,19 +66,20 @@ window.extraViews.rooms = async v => {
         $('#r-hours', v).innerHTML = Array.from({ length: H1 - H0 }, (_, i) => {
             const h = (H0 + i) * 60, sel = h + 60 > st.from && h < to;
             const past = st.day === 0 && h + 60 <= nowM;
-            return `<button class="hr ${sel ? 'sel' : ''} ${past ? 'past' : ''}" data-h="${h}">${st.day === 0 && nowM >= h && nowM < h + 60 ? `<i class="now" style="left:${(nowM - h) / 60 * 100}%"></i>` : ''}</button>`;
+            return `<button class="hr ${sel ? 'sel' : ''} ${past ? 'past' : ''}" data-h="${h}" title="Dalle ${hm(h)}">${st.day === 0 && nowM >= h && nowM < h + 60 ? `<i class="now" style="left:${(nowM - h) / 60 * 100}%"></i>` : ''}</button>`;
         }).join('');
         $$('#r-hours .hr', v).forEach(b => b.onclick = () => { st.from = Math.min(+b.dataset.h, H1 * 60 - 30); drawTime(); load(); });
     }
     async function load() {
         const body = $('#r-body', v);
-        body.innerHTML = `<div class="empty-state"><span class="spin"></span> Controllo l'occupazione delle aule…</div>`;
+        body.innerHTML = `<div class="empty-state small"><span class="spin"></span> Controllo l'occupazione delle aule…</div>`;
         const d = new Date(); d.setDate(d.getDate() + st.day); d.setHours(12, 0, 0, 0);
         const to = Math.min(H1 * 60, st.from + st.dur);
         try { RoomsUI.data = await api.rooms.status({ sede: st.sede, date: d.toISOString(), from: st.from, to }); }
         catch (e) { body.innerHTML = `<div class="empty-state">Impossibile contattare i servizi del Politecnico: ${esc(e.message)}</div>`; return; }
         const r = RoomsUI.data;
-        $('#r-sum', v).textContent = `${r.free} libere · ${r.partial} parzialmente · ${r.hidden ? r.hidden + ' con orario non pubblico' : ''}`;
+        const sede = $('#r-sede', v).selectedOptions[0];
+        $('#r-sum', v).textContent = [sede ? sede.textContent : '', `${r.free} libere`, `${r.partial} parzialmente`, r.hidden ? `${r.hidden} con orario non pubblico` : ''].filter(Boolean).join(' · ');
         drawBody();
     }
     function drawBody() {
@@ -89,26 +91,27 @@ window.extraViews.rooms = async v => {
         const want = r => r.status === 'free' || (RoomsUI.partial && r.status === 'partial');
         const blds = RoomsUI.data.buildings.filter(b => !RoomsUI.building || b.id === RoomsUI.building);
         const favRooms = RoomsUI.data.buildings.flatMap(b => b.rooms.map(r => ({ ...r, bname: b.name }))).filter(r => fav.rooms.includes(r.id));
-        const card = (r, bname) => `<div class="rcard ${r.status}" data-room="${r.id}" data-b="${r.edificio}">
-            <div class="ph" data-foto="${r.foto || ''}"></div>
-            <button class="star ${fav.rooms.includes(r.id) ? 'on' : ''}" data-star-room="${r.id}" title="Preferita">★</button>
-            <div class="rc-b"><div class="rc-n">${esc(r.name)}</div><div class="rc-s">${{ free: 'LIBERA', partial: 'PARZIALE', busy: 'OCCUPATA' }[r.status]}</div></div>
-            <div class="rc-meta">${r.capienza ? r.capienza + ' posti' : ''}${bname ? ' · ' + esc(bname) : ''}${r.status === 'free' && r.freeUntil ? ' · fino alle ' + r.freeUntil : r.status === 'free' ? ' · tutto il giorno' : ''}</div>
-            ${timeline(r.occ)}</div>`;
+        const until = r => r.status === 'free' ? (r.freeUntil && r.freeUntil !== '23:59' ? `libera fino alle ${r.freeUntil}` : 'libera tutto il giorno') : r.status === 'partial' ? 'libera solo in parte' : 'occupata';
+        const row = (r, bname) => `<div class="ra-room ${r.status}" data-room="${r.id}" data-b="${r.edificio}" tabindex="0">
+            <span class="ra-ph" data-foto="${r.foto || ''}"></span>
+            <span class="ra-n"><b>${esc(r.name)}</b><span class="faint">${[r.capienza ? r.capienza + ' posti' : '', bname ? esc(bname) : ''].filter(Boolean).join(' · ')}</span></span>
+            ${timeline(r.occ)}
+            <span class="pill ${r.status === 'free' ? 'ok' : r.status === 'partial' ? 'warn' : 'err'}">${until(r)}</span>
+            <button class="ghost small icon ra-star ${fav.rooms.includes(r.id) ? 'on' : ''}" data-star-room="${r.id}" title="${fav.rooms.includes(r.id) ? 'Togli dalle preferite' : 'Aggiungi alle preferite'}" aria-label="Preferita">${STAR}</button></div>`;
+        const group = (title, sub, extra, rows) => `<div class="ra-group"><div class="ra-gh"><b>${title}</b>${sub ? `<span class="faint">${sub}</span>` : ''}<span class="grow"></span>${extra}</div>${rows}</div>`;
         let html = '';
-        if (RoomsUI.building) html += `<div class="rb-filter">Edificio selezionato dalla mappa <button class="small" id="rb-clear">✕ Mostra tutti</button></div>`;
-        if (favRooms.length && !RoomsUI.building) html += `<div class="bgroup"><div class="bh"><span class="bchip">★ Preferite</span></div><div class="rgrid">${favRooms.map(r => card(r, r.bname)).join('')}</div></div>`;
+        if (RoomsUI.building) html += `<div class="note-line">${icon('pin')} <span class="grow">Solo l'edificio scelto sulla mappa</span><button class="small ghost" id="rb-clear">Mostra tutti</button></div>`;
+        if (favRooms.length && !RoomsUI.building) html += group(`<span class="ra-favic">${STAR}</span> Preferite`, '', '', favRooms.map(r => row(r, r.bname)).join(''));
         for (const b of blds) {
             const rs = b.rooms.filter(want);
             if (!rs.length) continue;
-            html += `<div class="bgroup"><div class="bh"><span class="bchip">${esc(b.name)}</span><span class="faint">${esc(b.address)}</span><span class="grow"></span><span class="pill ok">${b.free} libere</span>${b.partial ? `<span class="pill warn">${b.partial} parziali</span>` : ''}<button class="star ${fav.buildings.includes(b.id) ? 'on' : ''}" data-star-b="${b.id}" title="Edificio preferito">★</button></div>
-                <div class="rgrid">${rs.map(r => card(r)).join('')}</div></div>`;
+            html += group(esc(b.name), esc(b.address), `<span class="pill ok">${b.free} libere</span>${b.partial ? `<span class="pill warn">${b.partial} parziali</span>` : ''}<button class="ghost small icon ra-star ${fav.buildings.includes(b.id) ? 'on' : ''}" data-star-b="${b.id}" title="Edificio preferito" aria-label="Edificio preferito">${STAR}</button>`, rs.map(r => row(r)).join(''));
         }
         body.innerHTML = html || `<div class="empty-state"><h2>Nessuna aula libera</h2><p>Prova a cambiare orario, ridurre la durata o attivare «Anche parziali».</p></div>`;
         if ($('#rb-clear', body)) $('#rb-clear', body).onclick = () => { RoomsUI.building = null; drawBody(); };
         $$('[data-star-room]', body).forEach(b => b.onclick = e => { e.stopPropagation(); const id = b.dataset.starRoom; fav.rooms = fav.rooms.includes(id) ? fav.rooms.filter(x => x !== id) : [...fav.rooms, id]; saveRoomsPrefs(); drawBody(); });
         $$('[data-star-b]', body).forEach(b => b.onclick = () => { const id = b.dataset.starB; fav.buildings = fav.buildings.includes(id) ? fav.buildings.filter(x => x !== id) : [...fav.buildings, id]; saveRoomsPrefs(); drawBody(); });
-        $$('.rcard', body).forEach(c => c.onclick = () => roomDetail(c.dataset.room));
+        $$('.ra-room', body).forEach(c => { c.onclick = () => roomDetail(c.dataset.room); c.onkeydown = e => { if (e.key === 'Enter') roomDetail(c.dataset.room); }; });
         lazyPhotos(body);
     }
     function timeline(occ) {
@@ -153,7 +156,7 @@ window.extraViews.rooms = async v => {
             if (!e.isIntersecting) return; io.unobserve(e.target);
             const id = e.target.dataset.foto; if (!id) return;
             const url = RoomsUI.photos[id] !== undefined ? RoomsUI.photos[id] : (RoomsUI.photos[id] = await api.rooms.photo(id).catch(() => null));
-            if (url) e.target.style.backgroundImage = `url("${url}")`;
+            if (url) { e.target.style.backgroundImage = `url("${url}")`; e.target.classList.add('has'); }
         }), { root: null, rootMargin: '200px' });
         $$('[data-foto]', root).forEach(el => io.observe(el));
     }

@@ -26,10 +26,10 @@ calendario, aule libere e Pomodoro, tutto in un'unica app.
 | **👥 Lezioni parallele** | Se un corso ha le registrazioni di più docenti, ti chiede quale segui prima di scaricarle (anche più di uno). |
 | **🎙 Trascrizione locale** | Whisper large-v3-turbo o Parakeet, configurati in automatico per il tuo hardware (Apple Silicon, NVIDIA, solo CPU). Toglie ehm, mmm, ripetizioni e frasi inventate. L'audio non lascia il computer. |
 | **▶ Pagina della lezione** | Player interno (velocità fino a 3×, salto dei silenzi, ripresa automatica), trascrizione sincronizzata, cercabile e copiabile, anche sotto il video a schermo intero. Modalità cinema e **modalità appunti** (la lezione in una finestra separata). |
-| **✨ Studia con l'AI** | Per ogni lezione: sommario, appunti, riassunto, spiegazioni, **flashcard interattive**, **domande d'esame**, chat sulla lezione. Usa Antigravity CLI, Claude Code o GitHub Copilot CLI, con il modello che scegli; se finiscono i crediti cambia modello, strumento o aspetta il reset. |
+| **✨ Studia con l'AI** | Per ogni lezione: sommario, appunti, riassunto, spiegazioni, **flashcard interattive**, **domande d'esame**, chat sulla lezione. Usa Antigravity CLI, Claude Code, GitHub Copilot CLI, ChatGPT Codex CLI o OpenCode, con il modello che scegli, anche **modelli locali con Ollama** (nulla esce dal computer); se finiscono i crediti cambia modello, strumento o aspetta il reset. |
 | **📝 Temi d'esame** | Cerca il corso negli anni passati su WeBeep e PoliNetwork e scarica i temi d'esame con le soluzioni, senza doppioni, in ordine di data. Segna quelli fatti. |
 | **🔎 Ricerca semantica** | Cerca per significato in lezioni, slide e appunti (anche tra lingue diverse) e chiedi al corso, con risposte citate. Tutto in locale. |
-| **✎ Appunti** | Markdown, LaTeX o Typst (motori inclusi), con anteprima, assistente AI che propone modifiche da accettare una a una, dettatura vocale. Collegabili a una o più lezioni. |
+| **✎ Appunti** | Markdown, LaTeX o Typst (motori inclusi), con anteprima, assistente AI che propone modifiche da accettare una a una, dettatura vocale. Organizzati per corso e cartelle nella barra laterale; carica PDF, foto e documenti o **collega intere cartelle** del computer (non vengono copiate: restano sincronizzate). Collegabili a una o più lezioni. |
 | **📅 Studio** | Orario delle lezioni dai Servizi Online, calendario, **aule libere con mappa**, cose da fare, Pomodoro con statistiche. |
 | **☁ Sync e integrazioni** | Appunti e impostazioni su iCloud, Google Drive, Dropbox o OneDrive. Esporta in Notion, Note di Apple, Goodnotes, Notability, Obsidian. |
 | **🤖 Assistenti AI e script** | Server **MCP** e **riga di comando** per usare PoliDesk da Claude o dal tuo flusso di lavoro. |
@@ -48,9 +48,8 @@ calendario, aule libere e Pomodoro, tutto in un'unica app.
 ## Installazione
 
 1. Scarica l'installer dalla pagina **[Releases](../../releases)**:
-   - **macOS**: `.dmg` (Apple Silicon o Intel);
-   - **Windows**: `.exe`;
-   - **Linux**: `.AppImage` o `.deb`.
+   - **macOS**: `.dmg` (Apple Silicon `arm64` o Intel);
+   - **Windows** e **Linux**: per ora si compilano dai sorgenti (vedi [Sviluppo](docs/wiki/Sviluppo.md)), gli installer arriveranno nelle prossime versioni.
 2. Serve **Google Chrome** installato: il login PoliMi/SPID avviene in una sua finestra, sui siti ufficiali.
 3. Al primo avvio il **setup** analizza il computer e installa il motore di trascrizione più adatto (qualche minuto).
 

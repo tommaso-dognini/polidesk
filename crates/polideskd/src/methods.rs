@@ -286,9 +286,37 @@ pub async fn call(d: &Arc<Daemon>, method: &str, p: Value) -> Result<Value> {
                     e["course"] = c["name"].clone();
                 }
             }
+            // linked calendars (iCloud, Google, Microsoft, Mac): their own colour, refreshed in the background when stale
+            evs.extend(polidesk_core::calendars::occurrences(from, to));
+            evs.sort_by(|a, b| util::s(a, "start").cmp(util::s(b, "start")));
+            static REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !REFRESHING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                let d2 = d.clone();
+                tokio::spawn(async move {
+                    if let Ok(r) = polidesk_core::calendars::refresh(false).await {
+                        if util::f(&r, "refreshed") > 0.0 {
+                            d2.send(json!({ "type": "cal-updated" }));
+                        }
+                    }
+                    REFRESHING.store(false, std::sync::atomic::Ordering::SeqCst);
+                });
+            }
             let t = timetable::load();
-            Ok(json!({ "events": evs, "meta": { "updatedAt": t["updatedAt"], "feeds": t.get("feeds") } }))
+            Ok(json!({ "events": evs, "meta": { "updatedAt": t["updatedAt"], "calendars": polidesk_core::calendars::list() } }))
         }
+        "cal:feeds" => Ok(polidesk_core::calendars::list()),
+        "cal:addFeed" => {
+            let ids = util::str_list(p.get("macIds"));
+            polidesk_core::calendars::add(p.str_of("src").unwrap_or(""), p.str_of("name").unwrap_or(""), p.str_of("kind").unwrap_or(""), p.str_of("color").unwrap_or(""), &ids).await
+        }
+        "cal:updateFeed" => polidesk_core::calendars::update(p.req("id")?, &p["patch"]),
+        "cal:removeFeed" => {
+            polidesk_core::calendars::remove(p.req("id")?)?;
+            Ok(json!(true))
+        }
+        "cal:refreshFeeds" => polidesk_core::calendars::refresh(util::b(&p, "force")).await,
+        "cal:macStatus" => Ok(polidesk_core::calendars::mac_status().await),
+        "cal:macCalendars" => polidesk_core::calendars::mac_calendars().await,
         "cal:icsPath" => {
             let p = timetable::ics_path();
             if !p.exists() {

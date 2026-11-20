@@ -21,6 +21,8 @@ try {
 
 let win = null;
 let lessonWin = null;                           // "Modalità appunti": the lesson in its own window
+let lessonClosingForPopin = false;
+let lessonCurrent = null;
 const alive = w => w && !w.isDestroyed();
 const send = evt => { for (const w of [win, lessonWin]) if (alive(w)) w.webContents.send('evt', evt); };
 const sendMain = evt => { if (alive(win)) win.webContents.send('evt', evt); };
@@ -161,10 +163,17 @@ handle('cal:importIcs', async src => {
 
 // ---------- "Modalità appunti": the lesson (player + transcript) in a second window ----------
 // The main window stays free for notes, the course page and the rest of the app.
+// a frozen lesson window must never block closing it: give its page at most 800 ms to answer
+const askPage = (w, js) => Promise.race([w.webContents.executeJavaScript(js).catch(() => null), new Promise(r => setTimeout(() => r(null), 800))]);
 const lessonQuery = o => ({ popout: '1', course: String(o.courseId || ''), key: String(o.key || ''), t: String(Math.floor(o.t || 0)), play: o.playing ? '1' : '' });
 handle('lesson:popout', async o => {
     if (alive(lessonWin)) {
-        lessonWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: lessonQuery(o) });
+        // Stop the previous player before replacing its renderer so two lessons can never
+        // play during navigation in the reused window.
+        await askPage(lessonWin, "(() => { const v = document.querySelector('#player video'); if (v) v.pause(); })()");
+        lessonCurrent = { ...o };
+        lessonWin.setTitle(o.title ? `${o.title} — PoliDesk` : 'Lezione — PoliDesk');
+        await lessonWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: lessonQuery(o) });
         lessonWin.show(); lessonWin.focus();
         return true;
     }
@@ -174,10 +183,31 @@ handle('lesson:popout', async o => {
         x: b.x + Math.max(0, b.width - 900 - 24), y: b.y + 40,
         title: o.title ? `${o.title} — PoliDesk` : 'Lezione — PoliDesk',
         backgroundColor: nativeTheme.shouldUseDarkColors ? '#1c1c1e' : '#f5f5f7',
-        webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, plugins: true },
+        webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, plugins: true, spellcheck: true },
     });
     lessonWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-    lessonWin.on('closed', () => { lessonWin = null; sendMain({ type: 'lesson-window', open: false }); });
+    lessonCurrent = { ...o };
+    lessonClosingForPopin = false;
+    lessonWin.on('close', e => {
+        if (lessonClosingForPopin) return;
+        // Capture the live player state before its renderer is destroyed. Pause first,
+        // then let the main renderer create the only player.
+        e.preventDefault();
+        const closingWin = lessonWin;
+        askPage(closingWin, "(() => { const v = document.querySelector('#player video'); if (!v) return null; const state = { t: v.currentTime || 0, playing: !v.paused }; v.pause(); return state; })()")
+            .then(state => {
+                if (lessonWin !== closingWin || closingWin.isDestroyed()) return;
+                const current = lessonCurrent || {};
+                const saved = state || {};
+                if (alive(win)) {
+                    sendMain({ type: 'lesson-popin', courseId: current.courseId, key: current.key, t: saved.t ?? current.t ?? 0, playing: saved.playing ?? !!current.playing });
+                    win.show(); win.focus();
+                }
+                lessonClosingForPopin = true;
+                closingWin.close();
+            });
+    });
+    lessonWin.on('closed', () => { lessonWin = null; lessonCurrent = null; lessonClosingForPopin = false; sendMain({ type: 'lesson-window', open: false }); });
     lessonWin.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: lessonQuery(o) });
     sendMain({ type: 'lesson-window', open: true, courseId: o.courseId, key: o.key });
     return true;
@@ -186,7 +216,7 @@ handle('lesson:popout', async o => {
 handle('lesson:popin', async o => {
     sendMain({ type: 'lesson-popin', courseId: o.courseId, key: o.key, t: o.t || 0, playing: !!o.playing });
     if (alive(win)) { win.show(); win.focus(); }
-    if (alive(lessonWin)) lessonWin.close();
+    if (alive(lessonWin)) { lessonClosingForPopin = true; lessonWin.close(); }
     return true;
 });
 // from the lesson window: open a page (notes, course…) in the main window
@@ -196,6 +226,10 @@ handle('lesson:mainGo', async route => {
     return true;
 });
 handle('lesson:isOpen', async () => alive(lessonWin));
+
+// spell checker of the notes editor (registered with the other local channels, before forwardAll)
+handle('spell:set', async langs => { const { session } = require('electron'); session.defaultSession.setSpellCheckerLanguages((Array.isArray(langs) ? langs : []).filter(x => ['it-IT', 'en-US'].includes(x))); return true; });
+handle('spell:available', async () => require('electron').session.defaultSession.availableSpellCheckerLanguages);
 
 /** Markdown → PDF via an offscreen window (same KaTeX CSS as the preview). */
 async function mdToPdf(html, out) {
@@ -269,6 +303,16 @@ async function createWindow() {
     win.webContents.session.setPermissionRequestHandler((wc, perm, cb) => cb(allowed.has(perm)));
     win.webContents.session.setPermissionCheckHandler((wc, perm) => allowed.has(perm));
     win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+    win.webContents.on('context-menu', (_event, params) => {
+        const items = [];
+        if (params.misspelledWord) {
+            for (const suggestion of params.dictionarySuggestions || []) items.push({ label: suggestion, click: () => win.webContents.replaceMisspelling(suggestion) });
+            if (items.length) items.push({ type: 'separator' });
+            items.push({ label: 'Aggiungi al dizionario', click: () => win.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord) }, { type: 'separator' });
+        }
+        items.push({ role: 'cut' }, { role: 'copy' }, { role: 'paste' });
+        require('electron').Menu.buildFromTemplate(items).popup({ window: win });
+    });
     win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
     win.on('closed', () => { if (alive(lessonWin)) lessonWin.close(); });
     win.on('focus', () => daemon.request('cloud:autopull').catch(() => { }));
@@ -356,7 +400,11 @@ app.whenReady().then(async () => {
     try { await daemon.connect(); }
     catch (e) { dialog.showErrorBox('PoliDesk', `Impossibile avviare il motore di PoliDesk (polideskd).\n\n${e.message}`); }
     await createWindow();
-});
+    started = true;
+}).catch(e => { console.error(e); dialog.showErrorBox('PoliDesk', `Errore all'avvio di PoliDesk.\n\n${e && e.stack || e}`); });
+let started = false;
 // the daemon keeps running: downloads, transcriptions and AI jobs continue with the window closed
 app.on('window-all-closed', () => { daemon.close(); app.quit(); });
-app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+// a click on the Dock icon while the app is still starting must not open a window before the IPC handlers exist
+app.on('activate', () => { if (started && BrowserWindow.getAllWindows().length === 0) createWindow().catch(e => console.error(e)); });
+process.on('unhandledRejection', e => console.error('[main] unhandled rejection:', e));

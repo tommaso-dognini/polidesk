@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('polidesk', {
     assistant: { info: () => invoke('assistant:info'), addClaude: () => invoke('assistant:addClaude') },
     saveSettings: s => invoke('settings:save', s),
     setAppearance: a => invoke('appearance', a),
+    spell: { set: langs => invoke('spell:set', langs), available: () => invoke('spell:available') },
     pickDir: def => invoke('pick-dir', def),
     pickFiles: () => invoke('pick-files'),
     /** path on disk of a file dropped on the page (Electron ≥ 32: File.path is gone) */
@@ -67,6 +68,9 @@ contextBridge.exposeInMainWorld('polidesk', {
         importIcs: src => invoke('cal:importIcs', src),
         events: (from, to) => invoke('cal:events', { from, to }),
         revealIcs: () => invoke('cal:revealIcs'),
+        feeds: () => invoke('cal:feeds'), addFeed: f => invoke('cal:addFeed', f), updateFeed: (id, patch) => invoke('cal:updateFeed', { id, patch }),
+        removeFeed: id => invoke('cal:removeFeed', { id }), refreshFeeds: force => invoke('cal:refreshFeeds', { force: !!force }),
+        macStatus: () => invoke('cal:macStatus'), macCalendars: () => invoke('cal:macCalendars'),
     },
     rooms: { spaces: () => invoke('rooms:spaces'), free: q => invoke('rooms:free', q), status: q => invoke('rooms:status', q), photo: id => invoke('rooms:photo', id) },
     notes: {
@@ -74,7 +78,9 @@ contextBridge.exposeInMainWorld('polidesk', {
         list: scope => invoke('notes:list', scope),
         read: (scope, file) => invoke('notes:read', { scope, file }),
         write: (scope, file, content) => invoke('notes:write', { scope, file, content }),
-        create: (scope, title, kind) => invoke('notes:create', { scope, title, kind }),
+        create: (scope, title, kind, folder) => invoke('notes:create', { scope, title, kind, folder: folder || null }),
+        path: (scope, file) => invoke('notes:path', { scope, file }),
+        linkFolder: (scope, path) => invoke('notes:linkFolder', { scope, path }),
         rename: (scope, file, name) => invoke('notes:rename', { scope, file, name }),
         remove: (scope, file) => invoke('notes:remove', { scope, file }),
         asset: (scope, file, name, data) => invoke('notes:asset', { scope, file, name, data }),
@@ -112,6 +118,7 @@ contextBridge.exposeInMainWorld('polidesk', {
         index: force => invoke('pn:index', { force }), match: (courseId, q) => invoke('pn:match', { courseId, q }), tree: courseId => invoke('pn:tree', { courseId }),
         download: (courseId, files) => invoke('pn:download', { courseId, files }), status: courseId => invoke('pn:status', { courseId }), cancel: courseId => invoke('pn:cancel', { courseId }),
     },
+    enhanceAudio: (courseId, keys, restore) => invoke('audio:enhance', { courseId, keys: keys ? [].concat(keys) : undefined, restore: !!restore }),
     removeMaterials: (courseId, paths) => invoke('materials:remove', { courseId, paths: [].concat(paths) }),
     exams: { run: courseId => invoke('exams:run', { courseId }) },
     /** "Modalità appunti": the lesson (player + transcript) in a window of its own */

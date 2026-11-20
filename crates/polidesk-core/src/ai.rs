@@ -1,4 +1,5 @@
-//! Notes, summaries and answers through the student's own AI CLI: Antigravity (agy), Claude Code or GitHub Copilot CLI.
+//! Notes, summaries and answers through the student's own AI CLI: Antigravity (agy), Claude Code, GitHub Copilot CLI,
+//! ChatGPT Codex CLI or OpenCode. Codex and OpenCode can also use local models served by Ollama (nothing leaves the computer).
 //! Nothing is sent anywhere by PoliDesk itself: the CLI the student logged into does the work.
 use crate::{tools, util};
 use anyhow::{anyhow, bail, Result};
@@ -14,10 +15,12 @@ pub struct Provider {
     pub bin: &'static str,
     pub label: &'static str,
 }
-pub const PROVIDERS: [Provider; 3] = [
+pub const PROVIDERS: [Provider; 5] = [
     Provider { id: "agy", bin: "agy", label: "Antigravity CLI" },
     Provider { id: "claude", bin: "claude", label: "Claude Code" },
     Provider { id: "copilot", bin: "copilot", label: "GitHub Copilot CLI" },
+    Provider { id: "codex", bin: "codex", label: "ChatGPT Codex CLI" },
+    Provider { id: "opencode", bin: "opencode", label: "OpenCode" },
 ];
 /// How to install (official installers: a terminal one-liner) and log in, shown when a tool is missing.
 pub fn install_hint(id: &str) -> Value {
@@ -26,12 +29,14 @@ pub fn install_hint(id: &str) -> Value {
         "agy" => ("curl -fsSL https://antigravity.google/cli/install.sh | bash", "irm https://antigravity.google/cli/install.ps1 | iex", "agy", "https://antigravity.google"),
         "claude" => ("curl -fsSL https://claude.ai/install.sh | bash", "irm https://claude.ai/install.ps1 | iex", "claude (poi /login)", "https://claude.com/claude-code"),
         "copilot" => ("curl -fsSL https://gh.io/copilot-install | bash", "winget install GitHub.Copilot", "copilot (poi /login: serve un piano GitHub Copilot, anche Free)", "https://github.com/features/copilot/cli"),
+        "codex" => ("npm install -g @openai/codex", "npm install -g @openai/codex", "codex (poi «Sign in with ChatGPT»; con Ollama funziona anche senza account)", "https://developers.openai.com/codex/cli"),
+        "opencode" => ("curl -fsSL https://opencode.ai/install | bash", "npm install -g opencode-ai", "opencode auth login (oppure solo i modelli locali di Ollama, senza account)", "https://opencode.ai"),
         _ => return Value::Null,
     };
     json!({ "cmd": if win { windows } else { unix }, "shell": if win { "PowerShell" } else { "Terminale" }, "login": login, "url": url })
 }
 /// Pick order when the chosen tool is not installed.
-pub const ORDER: [&str; 3] = ["agy", "claude", "copilot"];
+pub const ORDER: [&str; 5] = ["agy", "claude", "copilot", "codex", "opencode"];
 fn provider(id: &str) -> Result<&'static Provider> {
     PROVIDERS.iter().find(|p| p.id == id).ok_or_else(|| anyhow!("Provider sconosciuto: {id}"))
 }
@@ -104,7 +109,7 @@ pub fn pick(settings: &Value) -> Result<String> {
             return Ok(id.to_string());
         }
     }
-    bail!("Nessuno strumento AI installato: installa Antigravity CLI, Claude Code o GitHub Copilot CLI da Impostazioni → AI")
+    bail!("Nessuno strumento AI installato: installa Antigravity CLI, Claude Code, GitHub Copilot CLI, ChatGPT Codex CLI o OpenCode da Impostazioni → AI")
 }
 pub fn label(id: &str) -> &'static str {
     provider(id).map(|p| p.label).unwrap_or("AI")
@@ -123,6 +128,51 @@ pub fn model_for(settings: &Value, provider_id: &str) -> String {
         return util::s(ai, "model").to_string();
     }
     String::new()
+}
+
+// ───────── local models (Ollama) ─────────
+
+/// Models installed in Ollama (empty if Ollama is not running).
+pub async fn ollama_models() -> Vec<String> {
+    let r = crate::net::client().get("http://127.0.0.1:11434/api/tags").timeout(std::time::Duration::from_secs(2)).send().await;
+    let Ok(r) = r else { return vec![] };
+    let v: Value = r.json().await.unwrap_or(Value::Null);
+    v["models"].as_array().into_iter().flatten().filter_map(|m| m["name"].as_str().map(String::from)).collect()
+}
+/// OpenCode config with the Ollama models, passed with OPENCODE_CONFIG (merged with the student's own
+/// config, which is never touched).
+async fn opencode_config() -> Option<std::path::PathBuf> {
+    let models = ollama_models().await;
+    if models.is_empty() {
+        return None;
+    }
+    let p = crate::paths::app_dir().join("opencode-ollama.json");
+    let cfg = json!({
+        "$schema": "https://opencode.ai/config.json",
+        "provider": { "ollama": {
+            "npm": "@ai-sdk/openai-compatible", "name": "Ollama (locale)",
+            "options": { "baseURL": "http://127.0.0.1:11434/v1" },
+            "models": Value::Object(models.iter().map(|m| (m.clone(), json!({ "name": m }))).collect()),
+        } },
+    });
+    util::write_json(&p, &cfg).ok()?;
+    Some(p)
+}
+/// Codex model id "ollama:<name>" = local model through Codex's open-source provider.
+fn model_args(provider_id: &str, model: &str) -> Vec<String> {
+    if model.is_empty() {
+        return vec![];
+    }
+    match (provider_id, model.strip_prefix("ollama:")) {
+        ("codex", Some(m)) => ["--oss", "--local-provider", "ollama", "-c", "model_provider=ollama", "-m", m].iter().map(|s| s.to_string()).collect(),
+        _ => vec!["--model".into(), model.into()],
+    }
+}
+fn strip_ansi(s: &str) -> String {
+    use regex::Regex;
+    use std::sync::LazyLock;
+    static ANSI: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]").unwrap());
+    ANSI.replace_all(s, "").into_owned()
 }
 
 /// Models a tool offers: [{ id, label, group }]. Models of the same `group` share one quota
@@ -152,6 +202,41 @@ pub async fn models(provider_id: &str) -> Value {
         // aliases that Claude Code keeps pointing at the latest model of each family
         "claude" => [("sonnet", "Sonnet (ultimo)"), ("opus", "Opus (ultimo)"), ("haiku", "Haiku (ultimo)")].iter().map(|(id, l)| json!({ "id": id, "label": l, "group": id })).collect(),
         "copilot" => vec![json!({ "id": "auto", "label": "Auto (sceglie Copilot)", "group": "copilot" })],
+        // the ChatGPT account's models (default) + local Ollama models
+        "codex" => {
+            let mut v = vec![json!({ "id": "gpt-5-codex", "label": "GPT-5 Codex", "group": "ChatGPT" }), json!({ "id": "gpt-5", "label": "GPT-5", "group": "ChatGPT" })];
+            v.extend(ollama_models().await.into_iter().map(|m| json!({ "id": format!("ollama:{m}"), "label": format!("{m} (locale)"), "group": "Ollama, sul tuo computer" })));
+            v
+        }
+        // `opencode models`: every provider the student configured, plus Ollama's local models
+        "opencode" => {
+            let cfg = opencode_config().await;
+            let out = match tools::which("opencode") {
+                Some(bin) => {
+                    let mut c = tools::command(bin);
+                    c.arg("models").stdin(Stdio::null());
+                    if let Some(p) = &cfg {
+                        c.env("OPENCODE_CONFIG", p);
+                    }
+                    tokio::time::timeout(std::time::Duration::from_secs(30), c.output()).await.ok().and_then(|r| r.ok())
+                }
+                None => None,
+            };
+            let text = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+            let mut v: Vec<Value> = strip_ansi(&text)
+                .lines()
+                .map(str::trim)
+                .filter_map(|l| l.split_once('/').map(|(p, m)| (l, p, m)))
+                .filter(|(l, _, _)| !l.contains(' '))
+                .map(|(l, p, m)| {
+                    let local = p == "ollama";
+                    json!({ "id": l, "label": if local { format!("{m} (locale)") } else { m.to_string() }, "group": if local { "Ollama, sul tuo computer".to_string() } else { p.to_string() } })
+                })
+                .collect();
+            // local models first: free and private
+            v.sort_by_key(|m| util::s(m, "group") != "Ollama, sul tuo computer");
+            v
+        }
         _ => vec![],
     };
     let v = json!(list);
@@ -184,6 +269,11 @@ pub fn limit_info(err: &str) -> Option<Value> {
 async fn run(p: &Provider, args: Vec<String>, cwd: &Path, stdin_text: &str, on_chunk: OnChunk<'_>, ok_empty: bool) -> Result<String> {
     let bin = tools::which(p.bin).ok_or_else(|| anyhow!("{} non trovato nel PATH", p.label))?;
     let mut c = tools::command(bin);
+    if p.id == "opencode" {
+        if let Some(cfg) = opencode_config().await {
+            c.env("OPENCODE_CONFIG", cfg);
+        }
+    }
     c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = c.spawn()?;
     let mut stdin = child.stdin.take().unwrap();
@@ -250,14 +340,28 @@ pub async fn run_prompt(provider_id: &str, prompt: &str, stdin_text: &str, model
             stdin.clear();
             vec!["-p".into(), full, "-s".into(), "--no-ask-user".into(), "--deny-tool=shell".into(), "--deny-tool=write".into()]
         }
+        // read-only sandbox, no session saved; the text arrives on stdin (appended as a <stdin> block)
+        "codex" => vec!["exec".into(), "--skip-git-repo-check".into(), "--sandbox".into(), "read-only".into(), "--color".into(), "never".into(), "--ephemeral".into()],
+        "opencode" => {
+            let full = if stdin.is_empty() { prompt.to_string() } else { format!("{prompt}\n\n<trascrizione>\n{stdin}\n</trascrizione>") };
+            stdin.clear();
+            let mut a = vec!["run".to_string()];
+            a.extend(model_args(p.id, model));
+            a.push(full);
+            a
+        }
         _ => vec!["-p".into(), prompt.into()],
     };
-    if !model.is_empty() {
-        args.push("--model".into());
-        args.push(model.into());
+    match p.id {
+        "opencode" => {}
+        "codex" => {
+            args.extend(model_args(p.id, model));
+            args.push(prompt.into());
+        }
+        _ => args.extend(model_args(p.id, model)),
     }
     let out = run(p, args, cwd, &stdin, on_chunk, false).await?;
-    Ok(format!("{}\n", out.trim()))
+    Ok(format!("{}\n", strip_ansi(&out).trim()))
 }
 
 /// Agentic run inside the course folder: the CLI may read transcripts/slides and write files.
@@ -266,13 +370,16 @@ pub async fn run_agent(provider_id: &str, prompt: &str, course_dir: &Path, model
     let mut args: Vec<String> = match p.id {
         "claude" => vec!["-p", prompt, "--permission-mode", "acceptEdits", "--allowedTools", "Read,Glob,Grep,Write,Edit"].into_iter().map(String::from).collect(),
         "agy" => vec!["-p", prompt, "--mode", "accept-edits"].into_iter().map(String::from).collect(),
+        // may read and write in the course folder only
+        "codex" => vec!["exec", "--skip-git-repo-check", "--sandbox", "workspace-write", "--color", "never", "--ephemeral"].into_iter().map(String::from).collect(),
+        "opencode" => vec!["run".to_string()],
         _ => vec!["-p", prompt, "-s", "--no-ask-user", "--allow-all-tools", "--deny-tool=shell"].into_iter().map(String::from).collect(),
     };
-    if !model.is_empty() {
-        args.push("--model".into());
-        args.push(model.into());
+    args.extend(model_args(p.id, model));
+    if matches!(p.id, "codex" | "opencode") {
+        args.push(prompt.into());
     }
-    run(p, args, course_dir, "", on_chunk, true).await
+    run(p, args, course_dir, "", on_chunk, true).await.map(|o| strip_ansi(&o))
 }
 
 /// Generate a note for one transcript and save it in <course>/note/. Returns the file name.
@@ -308,5 +415,25 @@ mod tests {
         assert_eq!(model_for(&s, "claude"), "opus");
         assert_eq!(model_for(&s, "agy"), "old"); // legacy single setting
         assert_eq!(model_for(&s, "copilot"), "");
+    }
+}
+
+#[cfg(test)]
+mod local_tests {
+    use super::*;
+    /// Needs Codex, OpenCode and Ollama with a model: `cargo test -p polidesk-core local_ai -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn local_ai() {
+        let m = ollama_models().await;
+        let local = m.first().expect("un modello in Ollama").clone();
+        for p in ["codex", "opencode"] {
+            let list = models(p).await;
+            println!("{p}: {} modelli, locali: {:?}", list.as_array().unwrap().len(), list.as_array().unwrap().iter().filter(|x| util::s(x, "group").starts_with("Ollama")).map(|x| util::s(x, "id").to_string()).collect::<Vec<_>>());
+            let id = if p == "codex" { format!("ollama:{local}") } else { format!("ollama/{local}") };
+            let out = run_prompt(p, "Rispondi con una sola frase in italiano: di cosa parla il testo?", "Oggi parliamo di integrali e somme di Riemann.", &id, &std::env::temp_dir(), &|_| {}).await.unwrap();
+            println!("{p} → {}", out.trim());
+            assert!(!out.trim().is_empty());
+        }
     }
 }

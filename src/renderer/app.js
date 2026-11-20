@@ -9,6 +9,7 @@ let S = null;                                   // state from main process
 let route = { name: 'dashboard' };              // {name, courseId?, key?, tab?, side?}
 const progress = {};                            // recording key -> {percent, speed}
 const tprog = {};                               // video path -> 'queued' | number | {error}
+const eprog = {};                               // recording key -> % of «Migliora l'audio» in progress
 const running = new Set();                      // course ids syncing
 let player = null;                              // current <video> (recording page)
 let aiStream = null, aiJob = null;                            // element receiving streamed AI output
@@ -78,7 +79,9 @@ const ICONS = {
     popin: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M14 10l-5 5M9 10v5h5"/>',
     theater: '<rect x="2" y="6" width="20" height="12" rx="2"/>',
     captions: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M7 15h4M13 15h4M7 11h10"/>',
+    mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/>',
     exam: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l2 2 4-4"/>',
+    link: '<path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.5 1.5"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.5-1.5"/>',
 };
 const icon = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ''}</svg>`;
 $$('[data-icon]').forEach(el => { el.innerHTML = icon(el.dataset.icon); });
@@ -146,7 +149,7 @@ function render() {
     // the recording page owns a <video>: never re-render it on state refresh, only update panels
     if (route.name === 'recording' && v.dataset.view === 'recording:' + route.key) { updateRecordingLive(); return; }
     // don't wipe forms the user is typing in
-    if ((route.name === 'settings' || route.name === 'setup' || ['impostazioni', 'panoramica', 'polinetwork'].includes(route.tab) || (window.noRerender && window.noRerender.has(route.name)) || ['calendar', 'rooms', 'todos', 'search'].includes(route.name)) && v.dataset.view === viewKey()) return;
+    if ((route.name === 'settings' || route.name === 'setup' || ['impostazioni', 'panoramica', 'polinetwork', 'appunti'].includes(route.tab) || (window.noRerender && window.noRerender.has(route.name)) || ['calendar', 'rooms', 'todos', 'search'].includes(route.name)) && v.dataset.view === viewKey()) return;
     v.dataset.view = viewKey();
     (views[route.name] || viewDashboard)(v);
 }
@@ -172,6 +175,7 @@ function renderSidebar() {
             <span class="ico">${ico}</span><span class="n">${esc(cname(c))}</span><span class="badge">${dl}/${recs.length}</span>${i < 9 ? `<span class="nk"><kbd>${navigator.platform.startsWith("Mac") ? "⌘" : "Ctrl"}</kbd><kbd>${i + 1}</kbd></span>` : ''}</a>`;
     }).join('') || '<div class="faint" style="padding:6px 10px">Nessun corso</div>';
     $$('#side-courses [data-course]').forEach(a => a.onclick = () => go({ name: 'course', courseId: a.dataset.course, tab: 'panoramica' }));
+    if (window.SideNotes) { SideNotes.ensure(); SideNotes.mark(); }
     const tr = Object.values(tprog).filter(x => x === 'queued' || typeof x === 'number').length;
     const eng = S.settings.transcription;
     const st = $('#side-status');
@@ -236,7 +240,7 @@ function viewCourse(v) {
     const full = c.manifest.course && c.manifest.course.fullname;
     const sub = [full && full.toLowerCase() !== cname(c).toLowerCase() ? full : '', `${recs.length} lezioni`, recs.length ? `${nTr} trascritte` : '',
         c.lastSync ? 'sync ' + new Date(c.lastSync).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' }) : 'mai sincronizzato'].filter(Boolean);
-    const tabs = [['panoramica', 'Panoramica'], ['lezioni', 'Lezioni', recs.length], ['materiale', 'Materiale', c.materials || (c.materialFiles || []).length ? (c.materialFiles || []).length : '']];
+    const tabs = [['panoramica', 'Panoramica'], ['lezioni', 'Lezioni', recs.length], ['materiale', 'Materiale', c.materials || (c.materialFiles || []).length ? (c.materialFiles || []).length : ''], ['appunti', 'Appunti']];
     if ((Array.isArray(c.polinetwork) && c.polinetwork.length) || tab === 'polinetwork') tabs.push(['polinetwork', 'Appunti PoliNetwork']);
     if (tab === 'note') tabs.push(['note', 'Note AI']);
     if (tab === 'impostazioni') tabs.push(['impostazioni', 'Impostazioni']);
@@ -255,7 +259,7 @@ function viewCourse(v) {
     $$('[data-tab]', v).forEach(b => b.onclick = () => go({ ...route, tab: b.dataset.tab }));
     $('#c-sync', v).onclick = () => guard(() => isRun ? api.stopSync() : api.sync([c.id]));
     $('#c-more', v).onclick = e => { const r = e.currentTarget.getBoundingClientRect(); showMenu(r.right - 250, r.bottom + 6, courseMenu(c)); };
-    ({ panoramica: window.tabOverview, lezioni: tabLessons, materiale: tabMaterials, note: tabNotes, impostazioni: tabCourseSettings, polinetwork: window.tabPoliNetwork })[tab](c, $('#tab', v));
+    ({ panoramica: window.tabOverview, lezioni: tabLessons, materiale: tabMaterials, appunti: window.tabCourseNotes, note: tabNotes, impostazioni: tabCourseSettings, polinetwork: window.tabPoliNetwork })[tab](c, $('#tab', v));
 }
 function courseMenu(c) {
     return [
@@ -380,6 +384,7 @@ function tabLessons(c, el) {
         ['Genera i sommari mancanti', async () => { const k2 = await api.notesBatch(c.id, 'sommario'); toast(k2 ? `Genero ${k2} sommari…` : 'Nessun sommario mancante'); }],
         ...Object.entries(S.templates).filter(([k]) => k !== 'sommario').map(([k, l]) => [`Genera ${l.split(' (')[0].toLowerCase()} per tutte le lezioni`, async () => { const k2 = await api.notesBatch(c.id, k); toast(k2 ? `Genero per ${k2} lezioni…` : 'Tutte le lezioni trascritte le hanno già'); }]),
         '-',
+        ['Migliora l\'audio delle lezioni scaricate', async () => { const r2 = await api.enhanceAudio(c.id); toast(r2.queued ? `Miglioro l'audio di ${r2.queued} lezioni: lo vedi in Attività` : 'L\'audio di tutte le lezioni scaricate è già migliorato'); }],
         ['Pulisci le trascrizioni (ehm, ripetizioni…)', async () => { const r2 = await api.cleanTranscripts(c.id); toast(`${r2.files} trascrizioni pulite, ${r2.removed} segmenti rimossi`); }],
     ]); };
 }
@@ -412,6 +417,8 @@ function lessonCard(c, r, num, linked) {
         : p && r.status !== 'error' ? `<span class="pill acc">${icon('download')} ${Math.round(p.percent || 0)}%</span><button class="small ghost icon-only" data-act="dlpause" title="Metti in pausa">${icon('pause')}</button>` : r.status === 'error' ? `<span class="pill err" title="${esc(r.error)}">download non riuscito</span><button class="small ghost" data-act="dl">Riprova</button>` : `<button class="small ghost" data-act="dl" title="Scarica le lezioni mancanti del corso">${icon('download')} Scarica</button>`;
     else if (!r.transcript) state = tp === 'paused' ? `<span class="pill">${icon('pause')} trascrizione in pausa</span><button class="small ghost" data-act="trres">${icon('play')} Riprendi</button>` : tp === 'queued' ? '<span class="pill">trascrizione in coda</span>' : typeof tp === 'number' ? `<span class="pill acc">trascrivo ${tp}%</span>` : tp && tp.error ? '<span class="pill err">trascrizione non riuscita</span><button class="small ghost" data-act="tr">Riprova</button>' : `<button class="small ghost" data-act="tr">${icon('mic')} Trascrivi</button>`;
     else { const at = resumeAt(r); if (at) state = `<span class="pill acc" title="Riprendi da dove eri rimasto">${icon('play')} ${fmtT(at)}</span>`; }
+    if (eprog[r.key] != null) state = `<span class="pill acc">🎚 audio ${Math.round(eprog[r.key])}%</span>` + state;
+    else if (r.audioEnhanced) state = `<span class="pill" title="Voce del docente ripulita e migliorata">🎚 audio migliorato</span>` + state;
     const kinds = r.notes.map(f => f.split(' - ').pop().replace(/\.md$/, '')).filter(k => k !== 'sommario');
     const tags = kinds.map(k => `<button class="ltag" data-act="ai:${esc(k)}">${AI_KIND[k] || esc(k)}</button>`);
     if (linked) tags.push(`<button class="ltag" data-act="notes">${icon('note')} ${linked} appunt${linked === 1 ? 'o' : 'i'}</button>`);
@@ -584,6 +591,7 @@ function tabCourseSettings(c, el) {
     <div class="group"><h3>Sincronizzazione</h3>
         ${field('Sync automatica', 'Includi il corso nella sync all\'avvio e periodica', sw('cs-auto', c.autoSync !== false))}
         ${field('Scarica il materiale', 'Slide, PDF e cartelle del corso in materiale/', sw('cs-mat', !!c.materials))}
+        ${field('Migliora l\'audio', 'Ripulisce la voce del docente (rumore di fondo, ronzii, volume irregolare) nei video appena scaricati. Tutto in locale; l\'audio originale resta nel file e si può ripristinare.', sw('cs-enh', c.enhanceAudio ?? !!(S.settings.download || {}).enhanceAudio) + `<button id="cs-enh-all" class="small" style="margin-left:8px">Migliora quelle già scaricate</button>`)}
         ${field('Temi d\'esame degli anni passati', 'Cerca il corso negli anni precedenti su WeBeep e scarica i temi d\'esame con le soluzioni, senza doppioni', sw('cs-exams', !!c.pastExams))}
         ${field('Guarda le lezioni in streaming', 'Non scarica i video: li guardi online dalla pagina della lezione. Scarica solo l\'audio, per trascrizione e appunti AI. Da ogni lezione puoi comunque scaricare il video intero.', sw('cs-stream', !!c.streamOnly))}
         <div id="cs-free"></div>
@@ -597,6 +605,15 @@ function tabCourseSettings(c, el) {
     <div class="row"><button class="danger" id="cs-del">Rimuovi corso</button><span class="faint">I file scaricati non vengono cancellati.</span><span class="grow"></span><button class="primary" id="cs-save">Salva</button></div>`;
     if ($('#cs-tch', el)) $('#cs-tch', el).onclick = () => askTeachers(c);
     drawFreeSpace(c, el);
+    $('#cs-enh', el).onchange = () => guard(async () => {
+        const on = $('#cs-enh', el).checked;
+        await api.updateCourse(c.id, { enhanceAudio: on }); c.enhanceAudio = on;
+        toast(on ? 'L\'audio delle prossime lezioni scaricate verrà migliorato' : 'Audio delle nuove lezioni lasciato com\'è');
+    });
+    $('#cs-enh-all', el).onclick = () => guard(async () => {
+        const r2 = await api.enhanceAudio(c.id);
+        toast(r2.queued ? `Miglioro l'audio di ${r2.queued} lezioni: lo vedi in Attività` : 'L\'audio di tutte le lezioni scaricate è già migliorato');
+    });
     $('#cs-stream', el).onchange = () => guard(async () => {
         await api.updateCourse(c.id, { streamOnly: $('#cs-stream', el).checked }); c.streamOnly = $('#cs-stream', el).checked;
         toast(c.streamOnly ? 'Le nuove lezioni si guardano in streaming' : 'Le lezioni verranno scaricate alla prossima sincronizzazione');
@@ -606,7 +623,7 @@ function tabCourseSettings(c, el) {
     $('#cs-save', el).onclick = () => guard(async () => {
         const patch = {
             name: $('#cs-name', el).value, input: $('#cs-input', el).value, dir: $('#cs-dir', el).value, language: $('#cs-lang', el).value,
-            autoSync: $('#cs-auto', el).checked, materials: $('#cs-mat', el).checked, pastExams: $('#cs-exams', el).checked, videoPassword: $('#cs-pwd', el).value, streamOnly: $('#cs-stream', el).checked,
+            autoSync: $('#cs-auto', el).checked, materials: $('#cs-mat', el).checked, pastExams: $('#cs-exams', el).checked, enhanceAudio: $('#cs-enh', el).checked, videoPassword: $('#cs-pwd', el).value, streamOnly: $('#cs-stream', el).checked,
             extraUrls: $('#cs-extra', el).value.split('\n').map(s => s.trim()).filter(Boolean),
         };
         if (patch.input !== c.input) patch.webeepId = null;
@@ -699,6 +716,7 @@ function lessonActions(c, r) {
         sum: () => guard(async () => { toast('Genero il sommario…'); await api.genNote(c.id, r.key, 'sommario'); }),
         tr: () => guard(async () => { await api.transcribe(c.id, [r.key]); tprog[vpath(c, r)] = 'queued'; toast('In coda per la trascrizione'); if (sideTab() === 'testo') drawSide(c, r); }),
         details: () => lessonDetails(c, r),
+        enh: () => guard(async () => { await api.enhanceAudio(c.id, [r.key], r.audioEnhanced); eprog[r.key] = 0; toast(r.audioEnhanced ? 'Ripristino l\'audio originale…' : 'Miglioro l\'audio della lezione: lo vedi in Attività'); }),
     };
 }
 function lessonMenu(c, r) {
@@ -710,6 +728,7 @@ function lessonMenu(c, r) {
         '-',
         ...(hasText ? [[hasSum ? 'Rigenera il sommario' : 'Genera il sommario', a.sum]] : []),
         ...(d.videoUrl ? [[r.transcript ? 'Trascrivi di nuovo' : 'Trascrivi', a.tr]] : []),
+        ...(r.videoExists || r.audioExists ? [[r.audioEnhanced ? 'Ripristina l\'audio originale' : 'Migliora l\'audio (voce del docente)', a.enh]] : []),
         ['Dettagli del file…', a.details],
     ].filter((x, i, arr) => x !== '-' || (i > 0 && i < arr.length - 1 && arr[i - 1] !== '-'));
 }
@@ -792,7 +811,16 @@ function drawPlayer(c, r, stream) {
         if ((fromSearch != null || pos > 5) && pos < vid.duration - 5) vid.currentTime = pos;
         if (route.autoplay) { route.autoplay = false; vid.play().catch(() => { }); }
     });
-    vid.addEventListener('ratechange', () => { $('#p-speed').value = String(vid.playbackRate); });
+    vid.addEventListener('ratechange', () => { $('#p-speed').value = String(vid.playbackRate); highlightSegment(vid.currentTime, true); });
+    // while playing, follow the transcript on every frame (timeupdate comes only ~4 times a second: at 2–3× that is
+    // up to a second late); highlightSegment does nothing unless the current line changed
+    let lastHl = 0;
+    const follow = now => {
+        if (!vid.isConnected) return;
+        if (!vid.paused && now - lastHl > 60) { lastHl = now; highlightSegment(vid.currentTime); }
+        requestAnimationFrame(follow);
+    };
+    requestAnimationFrame(follow);
     $('#p-play').onclick = () => vid.paused ? vid.play() : vid.pause();
     vid.onclick = () => $('#p-play').click();
     vid.ondblclick = () => $('#p-full').click();
@@ -887,27 +915,53 @@ function playStream(vid, sources, failed) {
     next();
 }
 
+// Transcript lines of a container, with their start times (rebuilt only when the list changes)
+const segCache = new WeakMap();
+function segLines(box, sel) {
+    let c = segCache.get(box);
+    const first = box.querySelector(sel);
+    if (!c || c.first !== first || !first || !first.isConnected) {
+        const lines = [...box.querySelectorAll(sel)];
+        c = { first, lines, starts: lines.map(l => +l.dataset.s), cur: null };
+        segCache.set(box, c);
+    }
+    return c;
+}
+/** Last line starting at or before t (binary search: long lectures have thousands of lines). */
+function segAt(starts, t) {
+    let lo = 0, hi = starts.length - 1, ans = -1;
+    while (lo <= hi) { const m = (lo + hi) >> 1; if (starts[m] <= t + 0.05) { ans = m; lo = m + 1; } else hi = m - 1; }
+    return ans;
+}
+/** Center a line in its own scroll box. Smooth only at normal speed and for short moves: at 2–3× a new line
+ *  comes before the animation ends, and animations interrupting each other left the panel behind the video. */
+function followLine(box, el, force) {
+    const top = el.offsetTop - box.clientHeight / 2 + el.offsetHeight / 2;
+    const rate = player ? player.playbackRate : 1;
+    const far = Math.abs(top - box.scrollTop) > box.clientHeight * 0.75;
+    box.scrollTo({ top, behavior: force || far || rate > 1.25 ? 'auto' : 'smooth' });
+}
 function highlightSegment(t, force) {
     // side panel
-    const lines = $$('#t-body .seg-line');
-    let cur = null;
-    for (const l of lines) { if (+l.dataset.s <= t) cur = l; else break; }
-    if (cur && !cur.classList.contains('cur')) {
-        $$('#t-body .seg-line.cur').forEach(x => x.classList.remove('cur'));
-        cur.classList.add('cur');
-        // scroll only the transcript panel, never the page (cinema mode puts the panel under the video)
-        const body = $('#r-side');
-        if (body && $('#r-follow') && $('#r-follow').checked && !document.fullscreenElement) body.scrollTo({ top: cur.offsetTop - body.clientHeight / 2 + cur.offsetHeight / 2, behavior: 'smooth' });
+    const body = $('#t-body');
+    if (body) {
+        const c = segLines(body, '.seg-line'), i = segAt(c.starts, t), cur = i >= 0 ? c.lines[i] : null;
+        if (cur && (force || cur !== c.cur)) {
+            if (c.cur) c.cur.classList.remove('cur');
+            cur.classList.add('cur'); c.cur = cur;
+            // scroll only the transcript panel, never the page (cinema mode puts the panel under the video)
+            const side = $('#r-side');
+            if (side && $('#r-follow') && $('#r-follow').checked && !document.fullscreenElement) followLine(side, cur, force);
+        }
     }
     // transcript under the full-screen video: always follows, scrolling only its own box
     const box = $('#player.fs-text #p-fstr');
     if (!box) return;
-    let fc = null;
-    for (const l of box.children) { if (+l.dataset.s <= t) fc = l; else break; }
-    if (fc && (force || !fc.classList.contains('cur'))) {
-        $$('.fs-line.cur', box).forEach(x => x.classList.remove('cur'));
-        fc.classList.add('cur');
-        box.scrollTo({ top: fc.offsetTop - box.clientHeight / 2 + fc.offsetHeight / 2, behavior: force ? 'auto' : 'smooth' });
+    const f = segLines(box, '.fs-line'), j = segAt(f.starts, t), fc = j >= 0 ? f.lines[j] : null;
+    if (fc && (force || fc !== f.cur)) {
+        if (f.cur) f.cur.classList.remove('cur');
+        fc.classList.add('cur'); f.cur = fc;
+        followLine(box, fc, force);
     }
 }
 function drawFsTranscript() {
@@ -1178,6 +1232,7 @@ document.addEventListener('keydown', e => {
 const PREF_PANES = [
     ['generale', 'Generale', 'settings', '#8e8e93'],
     ['aspetto', 'Aspetto', 'sun', '#0a84ff'],
+    ['download', 'Download', 'download', '#007aff'],
     ['sync', 'Sincronizzazione', 'refresh', '#30b158'],
     ['trascrizione', 'Trascrizione', 'mic', '#ff9500'],
     ['ai', 'Intelligenza artificiale', 'sparkles', '#af52de'],
@@ -1218,9 +1273,18 @@ function viewSettings(v) {
         ${field('Sincronizza all\'avvio', 'All\'apertura controlla tutti i corsi, nell\'ordine di priorità della dashboard', sw('s-onstart', s.autoSync.onStart))}
         ${field('Ripeti ogni', 'Mentre l\'app è aperta (0 = mai)', `<input id="s-interval" type="number" min="0" max="48" style="width:80px" value="${s.autoSync.intervalHours || 0}"><span class="muted">ore</span>`)}
     </div>
-    <div class="group" data-pane="sync"><h3>Download</h3>
-        ${field('Download in parallelo', '', `<input id="s-par" type="number" min="1" max="8" style="width:80px" value="${s.parallelDownloads}">`)}
+    <div class="group" data-pane="download"><h3>Download</h3>
+        ${field('Download in parallelo', 'Quante lezioni scaricare insieme', `<input id="s-par" type="number" min="1" max="8" style="width:80px" value="${s.parallelDownloads}">`)}
         ${field('Mostra il browser', 'La sincronizzazione usa il browser in background, senza finestre: il login PoliMi si apre in una finestra di PoliDesk solo quando serve. Attiva per vedere il browser mentre lavora (utile se qualcosa non funziona).', sw('s-showbrowser', !!(s.browser || {}).show))}
+        ${field('Trascrivi automaticamente', 'Dopo ogni download (motore e modello in Trascrizione)', sw('s-tauto-dl', s.transcription.auto))}
+    </div>
+    <div class="group" data-pane="download"><h3>Audio</h3>
+        ${field('Migliora l\'audio delle nuove lezioni', 'Ripulisce la voce del docente (rumore di fondo, ronzii, volume irregolare) appena una lezione è scaricata, prima della trascrizione. Tutto in locale; l\'audio originale resta nel file e si può ripristinare. Ogni corso può fare diversamente (tabella sotto).', sw('s-enh', !!(s.download || {}).enhanceAudio))}
+        ${field('Lezioni già scaricate', 'Migliora l\'audio di tutte le lezioni scaricate dei corsi in cui è attivo', `<button id="s-enh-all">${icon('refresh')} Migliora l'audio già scaricato</button>`)}
+    </div>
+    <div class="group" data-pane="download"><h3>Per ogni corso</h3>
+        <p class="pf-note">Cosa scarica PoliDesk per ciascun corso. Le stesse opzioni sono anche in Impostazioni del corso.</p>
+        <div id="s-dlc"></div>
     </div>
     <div class="group" data-pane="trascrizione"><h3>Trascrizione</h3>
         ${field('Motore', 'Configurato per questo computer', `<span class="pill ${s.setupDone ? 'ok' : 'warn'}">${esc(s.transcription.engine || 'auto')} · ${esc(s.transcription.model)}</span><button id="s-setup">Riconfigura…</button>`)}
@@ -1246,6 +1310,15 @@ function viewSettings(v) {
     if (window.settingsExtra) window.settingsExtra(v).then(() => prefsLayout(v)).catch(() => prefsLayout(v));
     if (window.DepsUI) DepsUI.render($('#s-deps', v), { compact: false });
     wireAiSettings(v, s.ai);
+    drawCourseDownloads(v);
+    $('#s-tauto-dl', v).onchange = e => { $('#s-tauto', v).checked = e.target.checked; };
+    $('#s-tauto', v).addEventListener('change', e => { $('#s-tauto-dl', v).checked = e.target.checked; });
+    $('#s-enh-all', v).onclick = () => guard(async () => {
+        const on = c => c.enhanceAudio ?? $('#s-enh', v).checked;
+        let n = 0;
+        for (const c of S.courses.filter(on)) n += (await api.enhanceAudio(c.id)).queued || 0;
+        toast(n ? `Miglioro l'audio di ${n} lezioni: lo vedi in Attività` : S.courses.some(on) ? 'L\'audio delle lezioni scaricate è già migliorato' : 'Attiva prima «Migliora l\'audio» (per tutti o per un corso)');
+    });
     prefsLayout(v);
     const set = (k, val) => { S.settings.ui = { ...(S.settings.ui || {}), [k]: val }; applyUi(); };
     $$('[data-seg]', v).forEach(g => $$('button', g).forEach(b => b.onclick = () => {
@@ -1261,19 +1334,47 @@ function viewSettings(v) {
     // everything outside s-extra (which saves by itself) is saved a moment after it changes, like macOS
     let timer = null;
     const save = () => guard(async () => {
+        if (!v.isConnected || !$('#s-par', v)) return;       // left Settings before the delayed save
         const cur = S.settings;
         await api.saveSettings({
             parallelDownloads: Math.max(1, Math.min(8, +$('#s-par', v).value || 3)), polimiEmail: $('#s-email', v).value.trim(), defaultRoot: $('#s-root', v).value,
             autoSync: { onStart: $('#s-onstart', v).checked, intervalHours: Math.max(0, +$('#s-interval', v).value || 0) },
             browser: { ...(cur.browser || {}), show: $('#s-showbrowser', v).checked },
+            download: { ...(cur.download || {}), enhanceAudio: $('#s-enh', v).checked },
             transcription: { ...cur.transcription, auto: $('#s-tauto', v).checked, model: $('#s-model', v).value, language: $('#s-lang', v).value },
             ai: { ...cur.ai, ...aiSettings(v, cur.ai), autoSummary: $('#s-sum', v).checked, autoNotes: $('#s-notes', v).checked },
         });
         await refresh();
     });
     const saveSoon = () => { clearTimeout(timer); timer = setTimeout(save, 350); };
-    $('#pf-body', v).addEventListener('change', e => { if (!e.target.closest('#s-extra') && !e.target.closest('#s-deps') && e.target.id !== 's-font') saveSoon(); });
+    $('#pf-body', v).addEventListener('change', e => { if (!e.target.closest('#s-extra') && !e.target.closest('#s-deps') && !e.target.closest('#s-dlc') && e.target.id !== 's-font') saveSoon(); });
+    $('#s-enh', v).addEventListener('change', () => setTimeout(() => drawCourseDownloads(v), 0));
     $$('#s-onlimit button', v).forEach(b => b.addEventListener('click', saveSoon));
+}
+/** Settings → Download: what each course downloads, one switch per option (saved right away). */
+function drawCourseDownloads(v) {
+    const box = $('#s-dlc', v); if (!box) return;
+    if (!S.courses.length) { box.innerHTML = '<div class="field"><span class="faint">Nessun corso: aggiungine uno dalla Dashboard.</span></div>'; return; }
+    const enhDef = $('#s-enh', v) ? $('#s-enh', v).checked : !!(S.settings.download || {}).enhanceAudio;
+    const COLS = [
+        ['materials', 'Materiale', 'Slide, PDF e cartelle del corso', c => !!c.materials],
+        ['pastExams', 'Temi d\'esame', 'Temi d\'esame degli anni passati, con le soluzioni', c => !!c.pastExams],
+        ['enhanceAudio', 'Audio migliorato', 'Ripulisce la voce del docente nelle lezioni scaricate', c => c.enhanceAudio ?? enhDef],
+        ['streamOnly', 'Solo streaming', 'Non scarica i video (solo l\'audio, per trascrizione e AI): li guardi online', c => !!c.streamOnly],
+        ['autoSync', 'Sync automatica', 'Includi nella sincronizzazione all\'avvio e periodica', c => c.autoSync !== false],
+    ];
+    box.innerHTML = `<div class="dlc"><div class="dlc-row dlc-head"><span>Corso</span>${COLS.map(([, l, h]) => `<span title="${esc(h)}">${l}</span>`).join('')}</div>
+        ${S.courses.map(c => `<div class="dlc-row"><a class="dlc-name" data-c="${esc(c.id)}">${esc(cname(c))}</a>${COLS.map(([k, , , get]) => `<span>${sw(`dlc-${k}-${c.id}`, get(c))}</span>`).join('')}</div>`).join('')}</div>`;
+    $$('.dlc-name', box).forEach(a => a.onclick = () => go({ name: 'course', courseId: a.dataset.c, tab: 'impostazioni' }));
+    for (const c of S.courses) for (const [k, l] of COLS) {
+        const i = $(`#dlc-${k}-${CSS.escape(c.id)}`, box);
+        i.onchange = () => guard(async () => {
+            await api.updateCourse(c.id, { [k]: i.checked }); c[k] = i.checked;
+            toast(`${cname(c)}: ${l.toLowerCase()} ${i.checked ? 'attivo' : 'disattivato'}`);
+            if (k === 'pastExams' && i.checked) await api.exams.run(c.id);
+            if (k === 'enhanceAudio' && i.checked) { const r = await api.enhanceAudio(c.id); if (r.queued) toast(`${cname(c)}: miglioro l'audio di ${r.queued} lezioni già scaricate`); }
+        });
+    }
 }
 /** Sidebar navigation + search across every pane. */
 function prefsLayout(v) {
@@ -1334,7 +1435,7 @@ function wireAiSettings(v, ai) {
         for (const m of list) (groups[m.group] = groups[m.group] || []).push(m);
         const multi = Object.keys(groups).length > 1 && list.length > Object.keys(groups).length;
         let h = def ? `<option value="">${esc(def)}</option>` : '';
-        h += Object.entries(groups).map(([g, ms]) => (multi ? `<optgroup label="Quota ${esc(g)}">` : '') + ms.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + (multi ? '</optgroup>' : '')).join('');
+        h += Object.entries(groups).map(([g, ms]) => (multi ? `<optgroup label="${/^Ollama/.test(g) ? esc(g) : 'Quota ' + esc(g)}">` : '') + ms.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.label)}</option>`).join('') + (multi ? '</optgroup>' : '')).join('');
         if (cur && !list.some(m => m.id === cur)) h += `<option value="${esc(cur)}" selected>${esc(cur)}</option>`;
         return h;
     };
@@ -1494,7 +1595,7 @@ let rafPending = false;
 // Views with their own state (editors, forms, players, async pages) must not be rebuilt on background
 // events: only the sidebar is refreshed. Data-driven lists (dashboard, lessons…) re-render.
 const isSticky = () => ['recording', 'settings', 'setup', 'notes', 'calendar', 'rooms', 'todos', 'community', 'search'].includes(route.name)
-    || ['impostazioni', 'panoramica', 'polinetwork'].includes(route.tab);
+    || ['impostazioni', 'panoramica', 'polinetwork', 'appunti'].includes(route.tab);
 const soft = () => { if (rafPending) return; rafPending = true; requestAnimationFrame(() => { rafPending = false; if (!S) return; if (isSticky()) { renderSidebar(); return; } $('#view').dataset.view = ''; render(); }); };
 let refreshT = null;
 const softRefresh = () => { clearTimeout(refreshT); refreshT = setTimeout(async () => { if (!isSticky()) $('#view').dataset.view = ''; await refresh(); }, 400); };
@@ -1537,6 +1638,18 @@ api.on(e => {
         case 'setup-log': { const l = $('#su-log'); if (l) { l.textContent += e.line + '\n'; l.scrollTop = 1e9; } break; }
         case 'refresh': softRefresh(); break;
         case 'pn-progress': case 'pn-done': if (window.PnUI) PnUI.onEvent(e); break;
+        case 'enhance-progress': eprog[e.key] = e.percent; soft(); break;
+        case 'enhance-done':
+            delete eprog[e.key];
+            if (e.error) toast('Audio non migliorato: ' + e.error, 6000);
+            // lesson open: reload the video at the same point, with the new audio
+            if (!e.error && route.name === 'recording' && route.key === e.key && player && recData && recData.videoUrl) {
+                const t = player.currentTime, play = !player.paused;
+                player.src = recData.videoUrl + (recData.videoUrl.includes('?') ? '&' : '?') + 'v=' + Date.now();
+                player.addEventListener('loadedmetadata', () => { player.currentTime = t; if (play) player.play().catch(() => { }); }, { once: true });
+                toast('Audio della lezione aggiornato');
+            }
+            softRefresh(); break;
         case 'lesson-popin': go({ name: 'recording', courseId: e.courseId, key: e.key, t: e.t, autoplay: e.playing }); break;
         case 'lesson-go': if (e.route) go(e.route); break;
         case 'teacher-choice': refresh().then(() => { const c = course(e.course); if (c) { teacherAsked.delete(c.id); askTeachers(c, { auto: true }); } }); break;

@@ -3,11 +3,13 @@
 pub mod ai;
 pub mod api;
 pub mod browser;
+pub mod calendars;
 pub mod cleaner;
 pub mod cloud;
 pub mod config;
 pub mod downloader;
 pub mod drives;
+pub mod enhance;
 pub mod exams;
 pub mod indexpage;
 pub mod integrations;

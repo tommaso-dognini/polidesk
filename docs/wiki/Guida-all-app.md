@@ -8,9 +8,10 @@
 
 | Scheda | Contenuto |
 |---|---|
-| **Panoramica** | «Chiedi al corso» (risposte con citazioni), scheda del corso generata dall'AI (in breve, docenti, esame, orario), cose da fare, prossime lezioni, statistiche di studio, appunti e materiale |
+| **Panoramica** | «Chiedi al corso» (risposte con citazioni), scheda del corso generata dall'AI (in breve, docenti, esame, orario), cose da fare, prossime lezioni, statistiche di studio |
 | **Lezioni** | Indice per data e una scheda per lezione: sommario, argomenti, pulsanti rapidi (▶ Guarda, Trascrizione, note AI, appunti collegati) |
 | **Materiale** | Slide e PDF divisi per sezione WeBeep |
+| **Appunti** | Gli appunti del corso con le loro cartelle (anche quelle collegate), ricerca, «Nuovo Markdown/LaTeX/Typst» e «Carica file o cartella» |
 | **Note AI** | Tutte le note generate dall'AI per il corso |
 | **Impostazioni** | Nome, cartella, lingua, sync automatica, materiale, link extra, password video, **docenti seguiti** |
 
@@ -38,6 +39,13 @@ La **scheda del corso** è scritta dall'AI e si aggiorna da sola finché non la 
 Ogni risultato si può **copiare**, **rigenerare** o trasformare in un **appunto modificabile** collegato alla lezione.
 
 ## Appunti
+Gli appunti sono nella **barra laterale**, sotto i corsi: ogni corso si apre con le sue cartelle e i suoi file, direttamente lì.
+- Clic su un corso o una cartella: si apre la sua pagina, con le sottocartelle, i file e i tasti **Nuovo Markdown / LaTeX / Typst** (creano l'appunto in quella cartella).
+- **＋** accanto a un corso o a una cartella crea un appunto lì; tasto destro per «Mostra nel Finder».
+- Il titolo **Appunti** apre la panoramica: tutti i corsi e gli appunti modificati di recente, con la ricerca.
+- **⬇ Carica**: PDF, foto degli appunti a mano, slide, documenti (vengono copiati tra gli appunti del corso), anche trascinandoli nella finestra.
+- **Cartelle collegate** (🔗): carica o trascina un'intera cartella e PoliDesk ne salva solo il percorso, senza copiarla. I file restano dove sono, si modificano e compilano direttamente e l'elenco si aggiorna quando torni sull'app. «Scollega cartella» la toglie dagli appunti senza toccare i file.
+
 Tre formati, ognuno con il suo editor:
 - **Markdown**: anteprima live, formule `$…$` e `$$…$$` (KaTeX), checklist, immagini incollate, link `[[altro appunto]]`.
 - **LaTeX**: si compila in PDF con Tectonic, gli errori sono segnati sulla riga.
@@ -49,7 +57,7 @@ Funzioni comuni:
 - **🎙 Detta**: la voce viene trascritta in locale.
 - **🔗 Collega a lezioni**: un appunto può riferirsi a una o più lezioni, anche di corsi diversi.
 - **Esporta**: PDF, più le app attivate in Impostazioni (Notion, Note di Apple, Goodnotes, Notability, Obsidian).
-- **Elenco dei file**: si nasconde con ⇤ o ⌘⇧E.
+- **Barra laterale**: si nasconde con ⌘\\ (o ⌘⇧E mentre scrivi).
 
 ## Cerca
 Ricerca semantica in trascrizioni, slide, sommari e appunti: trova i concetti anche con parole diverse o in un'altra lingua.

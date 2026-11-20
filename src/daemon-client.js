@@ -44,7 +44,11 @@ class DaemonClient {
 
     spawnDaemon() {
         fs.mkdirSync(APP_DIR, { recursive: true });
+        // the binary can be missing for a moment while the app is being replaced by a new version (Finder copy):
+        // fail this attempt quietly (the caller retries) instead of an uncaught "spawn ENOENT" in the main process
+        if (!this.bin || !fs.existsSync(this.bin)) throw new Error(`polideskd non trovato (${this.bin || 'percorso vuoto'})`);
         const p = spawn(this.bin, [], { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, ...this.env } });
+        p.on('error', e => this.log(`avvio di polideskd non riuscito: ${e.message}`));
         p.unref();
     }
 
@@ -80,7 +84,14 @@ class DaemonClient {
                 this.log(`polideskd ${hello.version} → ${want}`);
                 await this.call('daemon:shutdown').catch(() => { });
                 this.detach();
-                await new Promise(r => setTimeout(r, 400));
+                // wait until the old daemon has really gone (it closes Chrome first): reconnecting to it while it
+                // shuts down made the app's first requests fail with "connessione interrotta" at startup
+                for (let i = 0; i < 100; i++) {
+                    await new Promise(r => setTimeout(r, 100));
+                    const old = await this.connectOnce().catch(() => null);
+                    if (!old) break;
+                    old.destroy();
+                }
                 this.ready = null;
                 return this.connect();
             }
@@ -112,9 +123,18 @@ class DaemonClient {
             this.wait.clear();
             if (this.sock === s) { this.sock = null; this.ready = null; }
             // the daemon restarted or crashed: reconnect (and start it again) in the background
-            if (!this.closing) setTimeout(() => this.connect().then(() => this.onEvent({ type: 'refresh' })).catch(() => { }), 500);
+            if (!this.closing) this.reconnect();
         });
         s.on('error', () => { });
+    }
+    /** Reconnect in the background, retrying (e.g. while the app is being updated and the binary is missing). */
+    reconnect(attempt = 0) {
+        if (this.closing || this.reconnecting) return;
+        this.reconnecting = true;
+        setTimeout(() => this.connect()
+            .then(() => { this.reconnecting = false; this.onEvent({ type: 'refresh' }); })
+            .catch(e => { this.reconnecting = false; this.log(`riconnessione a polideskd: ${e.message}`); if (attempt < 30) this.reconnect(attempt + 1); }),
+        attempt ? Math.min(10000, 1000 * attempt) : 500);
     }
     detach() { const s = this.sock; this.sock = null; if (s) { s.removeAllListeners('close'); s.destroy(); } }
 
